@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mushroom Farm Climate Monitor</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="kicker">ESP32 RS485 Modbus</p>
+        <h1>Mushroom Farm Climate Monitor</h1>
+      </div>
+      <div class="topbar-actions">
+        <button class="button secondary" type="button" id="connectButton">Reconnect</button>
+        <button class="button primary" type="button" id="settingsButton">Settings</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="system-strip" aria-label="System status">
+        <div class="system-item">
+          <span>Source</span>
+          <strong id="sourceLabel">Demo</strong>
+        </div>
+        <div class="system-item">
+          <span>Status</span>
+          <strong id="connectionLabel">Starting</strong>
+        </div>
+        <div class="system-item">
+          <span>Last update</span>
+          <strong id="lastUpdateLabel">--</strong>
+        </div>
+        <div class="system-item">
+          <span>Room state</span>
+          <strong id="roomStateLabel">--</strong>
+        </div>
+      </section>
+
+      <section class="metric-grid" aria-label="Climate metrics">
+        <article class="metric-card" id="airCard">
+          <div class="metric-head">
+            <span>Air temperature</span>
+            <span class="pill" id="airPill">--</span>
+          </div>
+          <div class="metric-value">
+            <strong id="airValue">--</strong>
+            <span>deg C</span>
+          </div>
+          <div class="target-line" id="airTarget">Target 18-24 deg C</div>
+          <canvas class="sparkline" id="airSparkline" aria-label="Air temperature history"></canvas>
+        </article>
+
+        <article class="metric-card" id="humidityCard">
+          <div class="metric-head">
+            <span>Humidity</span>
+            <span class="pill" id="humidityPill">--</span>
+          </div>
+          <div class="metric-value">
+            <strong id="humidityValue">--</strong>
+            <span>%</span>
+          </div>
+          <div class="target-line" id="humidityTarget">Target 85-95%</div>
+          <canvas class="sparkline" id="humiditySparkline" aria-label="Humidity history"></canvas>
+        </article>
+
+        <article class="metric-card" id="substrateCard">
+          <div class="metric-head">
+            <span>PT100 temperature</span>
+            <span class="pill" id="substratePill">--</span>
+          </div>
+          <div class="metric-value">
+            <strong id="substrateValue">--</strong>
+            <span>deg C</span>
+          </div>
+          <div class="target-line" id="substrateTarget">Target 18-24 deg C</div>
+          <canvas class="sparkline" id="substrateSparkline" aria-label="PT100 temperature history"></canvas>
+        </article>
+
+        <article class="metric-card" id="vpdCard">
+          <div class="metric-head">
+            <span>VPD</span>
+            <span class="pill" id="vpdPill">--</span>
+          </div>
+          <div class="metric-value">
+            <strong id="vpdValue">--</strong>
+            <span>kPa</span>
+          </div>
+          <div class="target-line" id="vpdTarget">Target 0.20-0.80 kPa</div>
+          <canvas class="sparkline" id="vpdSparkline" aria-label="VPD history"></canvas>
+        </article>
+      </section>
+
+      <section class="workbench">
+        <div class="room-panel">
+          <div class="panel-head">
+            <h2>Grow Room</h2>
+            <span id="roomBadge" class="room-badge">--</span>
+          </div>
+          <div class="room-map" id="roomMap">
+            <div class="room-ceiling">
+              <span id="airNode" class="sensor-node">SHT20</span>
+              <span class="fan-ring"></span>
+            </div>
+            <div class="mist-layer" id="mistLayer"></div>
+            <div class="bed-stack">
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <span id="ptNode" class="sensor-node probe">PT100</span>
+            <div class="floor-line"></div>
+          </div>
+        </div>
+
+        <div class="device-panel">
+          <div class="panel-head">
+            <h2>Devices</h2>
+            <span id="deviceIp">--</span>
+          </div>
+          <div class="device-list">
+            <div class="device-row">
+              <span>SHT20</span>
+              <strong id="sht20State">--</strong>
+            </div>
+            <div class="device-row">
+              <span>PT100</span>
+              <strong id="pt100State">--</strong>
+            </div>
+            <div class="device-row">
+              <span>WiFi RSSI</span>
+              <strong id="wifiRssi">--</strong>
+            </div>
+            <div class="device-row">
+              <span>MQTT</span>
+              <strong id="mqttState">--</strong>
+            </div>
+            <div class="device-row">
+              <span>Uptime</span>
+              <strong id="uptime">--</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="settingsModal" hidden>
+    <form class="settings-modal" id="settingsForm">
+      <div class="modal-head">
+        <h2>Settings</h2>
+        <button type="button" class="icon-button" id="closeSettingsButton" aria-label="Close settings">x</button>
+      </div>
+
+      <fieldset class="segmented">
+        <legend>Data source</legend>
+        <label>
+          <input type="radio" name="source" value="demo">
+          <span>Demo</span>
+        </label>
+        <label>
+          <input type="radio" name="source" value="mqtt">
+          <span>MQTT WS</span>
+        </label>
+        <label>
+          <input type="radio" name="source" value="api">
+          <span>ESP32 API</span>
+        </label>
+      </fieldset>
+
+      <div class="form-grid">
+        <label>
+          <span>MQTT WebSocket URL</span>
+          <input id="mqttUrlInput" type="url" placeholder="wss://broker.example.com:8884/mqtt">
+        </label>
+        <label>
+          <span>MQTT topic</span>
+          <input id="mqttTopicInput" type="text" placeholder="centralcommand/room1/sensors">
+        </label>
+        <label>
+          <span>MQTT username</span>
+          <input id="mqttUserInput" type="text" autocomplete="username">
+        </label>
+        <label>
+          <span>MQTT password</span>
+          <input id="mqttPasswordInput" type="password" autocomplete="current-password">
+        </label>
+        <label class="wide">
+          <span>ESP32 API URL</span>
+          <input id="apiUrlInput" type="url" placeholder="http://192.168.1.50/api">
+        </label>
+      </div>
+
+      <div class="range-grid">
+        <label>
+          <span>Air min</span>
+          <input id="airMinInput" type="number" step="0.1">
+        </label>
+        <label>
+          <span>Air max</span>
+          <input id="airMaxInput" type="number" step="0.1">
+        </label>
+        <label>
+          <span>Humidity min</span>
+          <input id="humidityMinInput" type="number" step="0.1">
+        </label>
+        <label>
+          <span>Humidity max</span>
+          <input id="humidityMaxInput" type="number" step="0.1">
+        </label>
+        <label>
+          <span>PT100 min</span>
+          <input id="substrateMinInput" type="number" step="0.1">
+        </label>
+        <label>
+          <span>PT100 max</span>
+          <input id="substrateMaxInput" type="number" step="0.1">
+        </label>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="button secondary" id="resetSettingsButton">Reset</button>
+        <button type="submit" class="button primary">Save</button>
+      </div>
+    </form>
+  </div>
+</body>
+</html>

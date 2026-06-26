@@ -1,0 +1,19 @@
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Local editor state
+.vscode/
+.idea/
+
+# Firmware/build output
+.pio/
+build/
+*.bin
+*.elf
+*.hex
+
+# Local secrets
+secrets.h
+*.local
+app-config.local.js

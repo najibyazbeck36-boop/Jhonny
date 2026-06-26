@@ -1,0 +1,74 @@
+# Mushroom Farm Climate Monitor
+
+Static GitHub Pages dashboard for an ESP32 RS485/Modbus climate node in a mushroom farm.
+
+The ESP32 firmware reads:
+
+- SHT20 air temperature and humidity over Modbus RTU
+- PT100 temperature over Modbus RTU
+- WiFi and device health
+
+It publishes JSON to MQTT and exposes the same JSON at `/api`.
+
+## Files
+
+- `index.html` - web app shell
+- `styles.css` - dashboard styling
+- `app.js` - dashboard logic, MQTT WebSocket client, ESP32 API polling, demo mode
+- `firmware/central-command-rs485/central-command-rs485.ino` - ESP32 firmware
+
+## Recommended Data Path
+
+For a GitHub Pages dashboard, use MQTT over WebSockets:
+
+```text
+ESP32 -> MQTT broker on TCP 1883 -> MQTT broker WebSocket listener -> GitHub Pages dashboard
+```
+
+Browsers cannot connect directly to normal MQTT TCP port `1883`. The broker must expose a WebSocket URL such as:
+
+```text
+wss://your-broker.example.com:8884/mqtt
+ws://192.168.1.100:9001/mqtt
+```
+
+The firmware publishes to:
+
+```text
+centralcommand/room1/sensors
+```
+
+## ESP32 Setup
+
+1. Open `firmware/central-command-rs485/central-command-rs485.ino`.
+2. Set WiFi, OTA, MQTT broker, and sensor Modbus IDs.
+3. Install these Arduino libraries:
+   - `PubSubClient`
+   - `ModbusMaster`
+   - `ArduinoOTA` from ESP32 core
+4. Flash the ESP32.
+5. Confirm the serial monitor shows sensor values and MQTT publishes.
+
+## Dashboard Setup
+
+Open `index.html`, then choose `Settings`.
+
+Use `MQTT WS` when the dashboard is hosted on GitHub Pages.
+
+Use `ESP32 API` only when the browser can reach the ESP32 over local HTTP. GitHub Pages is HTTPS, so many browsers block direct `http://esp32-ip/api` requests from a GitHub Pages page.
+
+## GitHub Pages
+
+After committing and pushing:
+
+1. Open the repository on GitHub.
+2. Go to `Settings` -> `Pages`.
+3. Select `Deploy from a branch`.
+4. Choose branch `main` and folder `/root`.
+5. Save.
+
+If "Beehive FTTP" means Beehive FTP hosting, this app is static. Upload `index.html`, `styles.css`, and `app.js` to the web root. If it means a Beehive IoT/MQTT service, enter its WebSocket URL, topic, username, and password in the dashboard settings.
+
+## Safety Notes
+
+Do not commit private WiFi passwords, MQTT passwords, or OTA passwords to a public GitHub repository. Keep secrets in local firmware before flashing, or use a private repository.
