@@ -62,6 +62,74 @@
           <canvas class="sparkline" id="substrateSparkline" aria-label="Compost temperature history"></canvas>
         </article>
       </section>
+
+      <section class="control-panel" aria-label="IR blaster AC controls">
+        <div class="control-head">
+          <div>
+            <p class="kicker">IR Blaster</p>
+            <h2>NEOCLIMA AC Controller</h2>
+          </div>
+          <div class="control-actions">
+            <span class="pill" id="irBadge">Set URL</span>
+            <button class="button secondary" type="button" id="irRefreshButton">Refresh</button>
+          </div>
+        </div>
+
+        <div class="ir-layout">
+          <div class="ac-display">
+            <div class="ac-temp">
+              <strong id="acTemp">--</strong>
+              <span>deg C</span>
+            </div>
+            <div class="ac-stat-grid">
+              <div>
+                <span>Power</span>
+                <strong id="acPower">--</strong>
+              </div>
+              <div>
+                <span>Mode</span>
+                <strong id="acMode">--</strong>
+              </div>
+              <div>
+                <span>Fan</span>
+                <strong id="acFan">--</strong>
+              </div>
+            </div>
+            <p class="command-log" id="acLog">Configure IR Blaster URL in Settings.</p>
+          </div>
+
+          <div class="ac-controls">
+            <div class="control-group power-controls" aria-label="Power">
+              <button class="button primary" type="button" data-ir-cmd="on">ON</button>
+              <button class="button danger" type="button" data-ir-cmd="off">OFF</button>
+            </div>
+
+            <div class="control-group" aria-label="Temperature">
+              <button class="button secondary" type="button" data-ir-cmd="temp_down">Temp -</button>
+              <button class="button secondary" type="button" data-ir-cmd="temp_up">Temp +</button>
+              <button class="button secondary" type="button" data-ir-cmd="temp:20">20 C</button>
+              <button class="button secondary" type="button" data-ir-cmd="temp:22">22 C</button>
+              <button class="button secondary" type="button" data-ir-cmd="temp:24">24 C</button>
+              <button class="button secondary" type="button" data-ir-cmd="temp:26">26 C</button>
+            </div>
+
+            <div class="control-group" aria-label="Mode">
+              <button class="button secondary" type="button" data-ir-cmd="auto">Auto</button>
+              <button class="button secondary" type="button" data-ir-cmd="cool">Cool</button>
+              <button class="button secondary" type="button" data-ir-cmd="heat">Heat</button>
+              <button class="button secondary" type="button" data-ir-cmd="dry">Dry</button>
+              <button class="button secondary" type="button" data-ir-cmd="fan_mode">Fan</button>
+            </div>
+
+            <div class="control-group" aria-label="Fan">
+              <button class="button accent" type="button" data-ir-cmd="fan_auto">Fan Auto</button>
+              <button class="button accent" type="button" data-ir-cmd="fan_low">Fan Low</button>
+              <button class="button accent" type="button" data-ir-cmd="fan_med">Fan Med</button>
+              <button class="button accent" type="button" data-ir-cmd="fan_high">Fan High</button>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -108,6 +176,10 @@
         <label class="wide">
           <span>ESP32 API URL</span>
           <input id="apiUrlInput" type="url" placeholder="http://192.168.1.50/api">
+        </label>
+        <label class="wide">
+          <span>IR Blaster URL</span>
+          <input id="irUrlInput" type="url" placeholder="http://192.168.1.60">
         </label>
       </div>
 

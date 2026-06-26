@@ -8,6 +8,7 @@ const DEFAULT_SETTINGS = {
   mqttUser: "",
   mqttPassword: "",
   apiUrl: "http://192.168.1.50/api",
+  irUrl: "",
   targets: {
     air: { min: 18, max: 24 },
     humidity: { min: 85, max: 95 },
@@ -19,6 +20,8 @@ const state = {
   settings: loadSettings(),
   mqttClient: null,
   timer: null,
+  irTimer: null,
+  irBusy: false,
   connected: false,
   connectionText: "Starting",
   lastReading: null,
@@ -37,6 +40,7 @@ document.addEventListener("DOMContentLoaded", () => {
   hydrateSettingsForm();
   updateTargetLabels();
   startDataSource();
+  startIrPolling();
   window.addEventListener("resize", debounce(drawAllSparklines, 120));
 });
 
@@ -62,12 +66,20 @@ function cacheElements() {
     "mqttUserInput",
     "mqttPasswordInput",
     "apiUrlInput",
+    "irUrlInput",
     "airMinInput",
     "airMaxInput",
     "humidityMinInput",
     "humidityMaxInput",
     "substrateMinInput",
-    "substrateMaxInput"
+    "substrateMaxInput",
+    "irBadge",
+    "irRefreshButton",
+    "acTemp",
+    "acPower",
+    "acMode",
+    "acFan",
+    "acLog"
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
@@ -77,17 +89,25 @@ function cacheElements() {
     humidity: document.getElementById("humiditySparkline"),
     substrate: document.getElementById("substrateSparkline")
   };
+
+  els.irCommandButtons = Array.from(document.querySelectorAll("[data-ir-cmd]"));
 }
 
 function bindEvents() {
   els.settingsButton.addEventListener("click", openSettings);
   els.closeSettingsButton.addEventListener("click", closeSettings);
   els.connectButton.addEventListener("click", startDataSource);
+  els.irRefreshButton.addEventListener("click", loadIrStatus);
+  els.irCommandButtons.forEach((button) => {
+    button.addEventListener("click", () => sendIrCommand(button.dataset.irCmd));
+  });
+
   els.resetSettingsButton.addEventListener("click", () => {
     state.settings = structuredClone(DEFAULT_SETTINGS);
     saveSettings();
     hydrateSettingsForm();
     updateTargetLabels();
+    startIrPolling();
   });
 
   els.settingsModal.addEventListener("click", (event) => {
@@ -103,6 +123,7 @@ function bindEvents() {
     updateTargetLabels();
     closeSettings();
     startDataSource();
+    startIrPolling();
   });
 }
 
@@ -152,6 +173,7 @@ function hydrateSettingsForm() {
   els.mqttUserInput.value = settings.mqttUser;
   els.mqttPasswordInput.value = settings.mqttPassword;
   els.apiUrlInput.value = settings.apiUrl;
+  els.irUrlInput.value = settings.irUrl || "";
   els.airMinInput.value = settings.targets.air.min;
   els.airMaxInput.value = settings.targets.air.max;
   els.humidityMinInput.value = settings.targets.humidity.min;
@@ -170,6 +192,7 @@ function readSettingsForm() {
   settings.mqttUser = els.mqttUserInput.value.trim();
   settings.mqttPassword = els.mqttPasswordInput.value;
   settings.apiUrl = els.apiUrlInput.value.trim() || DEFAULT_SETTINGS.apiUrl;
+  settings.irUrl = normalizeDeviceUrl(els.irUrlInput.value);
   settings.targets.air.min = numberOrDefault(els.airMinInput.value, DEFAULT_SETTINGS.targets.air.min);
   settings.targets.air.max = numberOrDefault(els.airMaxInput.value, DEFAULT_SETTINGS.targets.air.max);
   settings.targets.humidity.min = numberOrDefault(els.humidityMinInput.value, DEFAULT_SETTINGS.targets.humidity.min);
@@ -208,6 +231,191 @@ function stopDataSource() {
     state.mqttClient.end(true);
     state.mqttClient = null;
   }
+}
+
+function startIrPolling() {
+  stopIrPolling();
+  renderIrUnavailable("Set URL", "Configure IR Blaster URL in Settings.");
+
+  if (!state.settings.irUrl) {
+    return;
+  }
+
+  loadIrStatus();
+  state.irTimer = setInterval(loadIrStatus, 10000);
+}
+
+function stopIrPolling() {
+  if (state.irTimer) {
+    clearInterval(state.irTimer);
+    state.irTimer = null;
+  }
+}
+
+async function loadIrStatus() {
+  if (!state.settings.irUrl) {
+    renderIrUnavailable("Set URL", "Configure IR Blaster URL in Settings.");
+    return;
+  }
+
+  if (isHttpsPageWithHttpDevice(state.settings.irUrl)) {
+    renderIrUnavailable("HTTPS blocked", "Direct HTTP control is blocked from this HTTPS page.");
+    return;
+  }
+
+  try {
+    setIrBadge("Checking", "warn");
+    const response = await fetch(`${state.settings.irUrl}/status`, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const status = normalizeIrStatus(await response.json());
+    renderIrStatus(status);
+    setIrBadge("Online", "ok");
+  } catch (error) {
+    renderIrUnavailable("Offline", readableError(error));
+  }
+}
+
+async function sendIrCommand(command) {
+  if (!state.settings.irUrl) {
+    renderIrUnavailable("Set URL", "Configure IR Blaster URL in Settings.");
+    return;
+  }
+
+  if (isHttpsPageWithHttpDevice(state.settings.irUrl)) {
+    renderIrUnavailable("HTTPS blocked", "Direct HTTP control is blocked from this HTTPS page.");
+    return;
+  }
+
+  state.irBusy = true;
+  setIrControlsEnabled(false);
+  setIrBadge("Sending", "warn");
+  els.acLog.textContent = `Sending ${formatCommand(command)}...`;
+
+  try {
+    const response = await fetch(`${state.settings.irUrl}/cmd?c=${encodeURIComponent(command)}`, {
+      cache: "no-store"
+    });
+    const message = await response.text();
+
+    if (!response.ok) {
+      throw new Error(message || `HTTP ${response.status}`);
+    }
+
+    els.acLog.textContent = message || `Command sent: ${formatCommand(command)}`;
+    await loadIrStatus();
+  } catch (error) {
+    renderIrUnavailable("Offline", readableError(error));
+  } finally {
+    state.irBusy = false;
+    setIrControlsEnabled(Boolean(state.settings.irUrl));
+  }
+}
+
+function normalizeIrStatus(payload) {
+  const temp = firstNumber(payload.temp, payload.temperature, payload.ac_temperature);
+
+  return {
+    power: normalizePower(payload.power),
+    temp,
+    mode: normalizeText(payload.mode),
+    fan: normalizeText(payload.fan)
+  };
+}
+
+function renderIrStatus(status) {
+  els.acTemp.textContent = isFiniteNumber(status.temp) ? String(status.temp) : "--";
+  els.acPower.textContent = status.power;
+  els.acMode.textContent = status.mode;
+  els.acFan.textContent = status.fan;
+  setIrControlsEnabled(Boolean(state.settings.irUrl) && !state.irBusy);
+  updateIrSelections(status);
+}
+
+function renderIrUnavailable(label, logMessage) {
+  setIrBadge(label, label === "Set URL" ? "" : "bad");
+  els.acTemp.textContent = "--";
+  els.acPower.textContent = "--";
+  els.acMode.textContent = "--";
+  els.acFan.textContent = "--";
+  els.acLog.textContent = logMessage;
+  setIrControlsEnabled(false);
+  updateIrSelections(null);
+}
+
+function setIrBadge(text, tone) {
+  els.irBadge.textContent = text;
+  els.irBadge.className = `pill ${tone}`;
+}
+
+function setIrControlsEnabled(enabled) {
+  els.irCommandButtons.forEach((button) => {
+    button.disabled = !enabled;
+  });
+  els.irRefreshButton.disabled = !state.settings.irUrl || state.irBusy;
+}
+
+function updateIrSelections(status) {
+  els.irCommandButtons.forEach((button) => {
+    const command = button.dataset.irCmd;
+    let selected = false;
+
+    if (status) {
+      selected =
+        (command === "on" && status.power === "ON") ||
+        (command === "off" && status.power === "OFF") ||
+        (command.startsWith("temp:") && Number(command.slice(5)) === status.temp) ||
+        (command === "fan_mode" && status.mode === "fan") ||
+        (["auto", "cool", "heat", "dry"].includes(command) && status.mode === command) ||
+        (command.startsWith("fan_") && command.slice(4) === status.fan);
+    }
+
+    button.classList.toggle("selected", selected);
+  });
+}
+
+function normalizePower(value) {
+  if (value === true || value === 1 || value === "1") {
+    return "ON";
+  }
+
+  if (value === false || value === 0 || value === "0") {
+    return "OFF";
+  }
+
+  const text = String(value || "--").toUpperCase();
+  return text === "ON" || text === "OFF" ? text : "--";
+}
+
+function normalizeText(value) {
+  return String(value || "--").toLowerCase();
+}
+
+function normalizeDeviceUrl(value) {
+  let url = value.trim();
+  if (!url) {
+    return "";
+  }
+
+  if (!/^https?:\/\//i.test(url)) {
+    url = `http://${url}`;
+  }
+
+  return url.replace(/\/+$/, "");
+}
+
+function isHttpsPageWithHttpDevice(deviceUrl) {
+  try {
+    return window.location.protocol === "https:" && new URL(deviceUrl).protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function formatCommand(command) {
+  return command.replace("temp:", "").replaceAll("_", " ");
 }
 
 function startDemo() {
@@ -523,9 +731,8 @@ function jitter(amount) {
 
 function firstNumber(...values) {
   for (const value of values) {
-    const number = Number(value);
-    if (Number.isFinite(number)) {
-      return number;
+    if (isFiniteNumber(value)) {
+      return Number(value);
     }
   }
   return null;
