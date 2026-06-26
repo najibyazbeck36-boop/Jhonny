@@ -150,37 +150,38 @@ MQTT WebSocket URL: wss://your-cluster-host.s1.eu.hivemq.cloud:8884/mqtt
 MQTT topic: centralcommand/room1/sensors
 MQTT username: your-hivemq-username
 MQTT password: your-hivemq-password
+AC MQTT command topic: centralcommand/room1/ac/cmd
+AC MQTT status topic: centralcommand/room1/ac/status
 ```
 
-Set `AC ESP URL` to the second ESP32 address, for example:
+For GitHub Pages, AC control should use MQTT because browsers block HTTPS pages from calling local `http://` ESP32 URLs. The dashboard publishes AC commands to:
 
 ```text
-http://192.168.1.60
+centralcommand/room1/ac/cmd
 ```
 
-The dashboard calls:
+The AC ESP32 publishes retained AC status to:
 
 ```text
-GET /status
-GET /cmd?c=on
-GET /cmd?c=temp:24
+centralcommand/room1/ac/status
 ```
 
-The AC Control firmware in this repo has CORS headers enabled so the dashboard can call it from another web page.
+The command payloads are the same button commands used by the dashboard, for example `on`, `off`, `temp:24`, `cool`, and `fan_high`.
 
 ## AC Control ESP Setup
 
-1. Open `firmware/neoclima-ir-blaster/neoclima-ir-blaster.ino`.
-2. Set WiFi credentials locally before flashing.
+1. Copy `firmware/neoclima-ir-blaster/secrets.example.h` to `firmware/neoclima-ir-blaster/secrets.h`.
+2. Set WiFi, MQTT broker, MQTT credentials, and AC MQTT topics locally before flashing.
 3. Install these Arduino libraries:
    - `IRremoteESP8266`
    - `ESPAsyncWebServer`
    - `AsyncTCP`
+   - `PubSubClient`
 4. Flash the second ESP32.
-5. Open the serial monitor and copy the printed `AC Control ESP IP`.
-6. Paste that address into `Settings` -> `AC ESP URL` and press `Save`.
+5. Open the serial monitor and confirm it prints `Connecting AC MQTT... connected`.
+6. In the dashboard `Settings`, leave `AC ESP URL local HTTP` empty for GitHub Pages, or keep it only for local HTTP testing.
 
-If the dashboard is loaded from GitHub Pages over HTTPS, direct commands to a local `http://` ESP32 can be blocked by the browser. For direct HTTP control, open `index.html` locally or host the dashboard over HTTP on the same network. For public HTTPS control, put the AC Control ESP behind an HTTPS endpoint or add an MQTT command bridge.
+For direct HTTP control on the same network, open `index.html` locally or host the dashboard over HTTP and set `AC ESP URL local HTTP` to the second ESP32 address, for example `http://192.168.1.60`.
 
 ## GitHub Pages
 

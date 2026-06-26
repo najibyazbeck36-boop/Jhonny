@@ -1,15 +1,66 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
+#include <PubSubClient.h>
 
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
 #include <ir_Neoclima.h>
 
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+
 // ================= WIFI =================
-const char* WIFI_SSID = "YOUR_WIFI_NAME";
-const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
+#ifndef WIFI_SSID_VALUE
+#define WIFI_SSID_VALUE "YOUR_WIFI_NAME"
+#endif
+
+#ifndef WIFI_PASS_VALUE
+#define WIFI_PASS_VALUE "YOUR_WIFI_PASSWORD"
+#endif
+
+const char* WIFI_SSID = WIFI_SSID_VALUE;
+const char* WIFI_PASS = WIFI_PASS_VALUE;
+
+// ================= MQTT =================
+#ifndef MQTT_SERVER_VALUE
+#define MQTT_SERVER_VALUE "192.168.1.100"
+#endif
+
+#ifndef MQTT_PORT_VALUE
+#define MQTT_PORT_VALUE 1883
+#endif
+
+#ifndef MQTT_USER_VALUE
+#define MQTT_USER_VALUE ""
+#endif
+
+#ifndef MQTT_PASS_VALUE
+#define MQTT_PASS_VALUE ""
+#endif
+
+#ifndef MQTT_USE_TLS_VALUE
+#define MQTT_USE_TLS_VALUE 1
+#endif
+
+#ifndef MQTT_TOPIC_AC_COMMAND_VALUE
+#define MQTT_TOPIC_AC_COMMAND_VALUE "centralcommand/room1/ac/cmd"
+#endif
+
+#ifndef MQTT_TOPIC_AC_STATUS_VALUE
+#define MQTT_TOPIC_AC_STATUS_VALUE "centralcommand/room1/ac/status"
+#endif
+
+const char* MQTT_SERVER = MQTT_SERVER_VALUE;
+const int MQTT_PORT = MQTT_PORT_VALUE;
+const char* MQTT_USER = MQTT_USER_VALUE;
+const char* MQTT_PASS = MQTT_PASS_VALUE;
+const bool MQTT_USE_TLS = MQTT_USE_TLS_VALUE;
+const char* MQTT_TOPIC_AC_COMMAND = MQTT_TOPIC_AC_COMMAND_VALUE;
+const char* MQTT_TOPIC_AC_STATUS = MQTT_TOPIC_AC_STATUS_VALUE;
 
 // ================= IR =================
 const uint16_t kIrLedPin = 27;
@@ -17,6 +68,20 @@ IRNeoclimaAc ac(kIrLedPin);
 
 // ================= WEB SERVER =================
 AsyncWebServer server(80);
+
+#if MQTT_USE_TLS_VALUE
+WiFiClientSecure espClient;
+#else
+WiFiClient espClient;
+#endif
+
+PubSubClient mqtt(espClient);
+
+unsigned long lastWifiRetry = 0;
+unsigned long lastMqttStatus = 0;
+
+const unsigned long WIFI_RETRY_INTERVAL = 30000;
+const unsigned long MQTT_STATUS_INTERVAL = 30000;
 
 // ================= AC STATE =================
 bool powerState = false;
@@ -80,9 +145,26 @@ String statusJson() {
   json += "\",";
   json += "\"ip\":\"";
   json += WiFi.localIP().toString();
-  json += "\"";
+  json += "\",";
+  json += "\"mqtt_connected\":";
+  json += (mqtt.connected() ? "true" : "false");
+  json += ",";
+  json += "\"uptime_ms\":";
+  json += String(millis());
   json += "}";
   return json;
+}
+
+void publishAcStatus() {
+  if (!mqtt.connected()) {
+    return;
+  }
+
+  String payload = statusJson();
+  mqtt.publish(MQTT_TOPIC_AC_STATUS, payload.c_str(), true);
+
+  Serial.print("AC MQTT status: ");
+  Serial.println(payload);
 }
 
 String htmlPage() {
@@ -241,6 +323,65 @@ bool applyCommand(String cmd) {
   return true;
 }
 
+void handleMqttMessage(char* topic, byte* payload, unsigned int length) {
+  if (String(topic) != MQTT_TOPIC_AC_COMMAND) {
+    return;
+  }
+
+  String cmd;
+  for (unsigned int i = 0; i < length; i++) {
+    cmd += (char)payload[i];
+  }
+
+  cmd.trim();
+
+  Serial.print("AC MQTT command: ");
+  Serial.println(cmd);
+
+  if (cmd == "status") {
+    publishAcStatus();
+    return;
+  }
+
+  if (!applyCommand(cmd)) {
+    Serial.print("Unknown MQTT command: ");
+    Serial.println(cmd);
+    publishAcStatus();
+    return;
+  }
+
+  sendAcState();
+  publishAcStatus();
+}
+
+void connectMQTT() {
+  if (mqtt.connected() || WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  Serial.print("Connecting AC MQTT... ");
+
+  String clientId = "ESP32-NEOCLIMA-";
+  clientId += String((uint32_t)ESP.getEfuseMac(), HEX);
+
+  bool ok;
+
+  if (strlen(MQTT_USER) > 0) {
+    ok = mqtt.connect(clientId.c_str(), MQTT_USER, MQTT_PASS, MQTT_TOPIC_AC_STATUS, 0, true, "offline");
+  } else {
+    ok = mqtt.connect(clientId.c_str(), MQTT_TOPIC_AC_STATUS, 0, true, "offline");
+  }
+
+  if (ok) {
+    Serial.println("connected");
+    mqtt.subscribe(MQTT_TOPIC_AC_COMMAND);
+    publishAcStatus();
+  } else {
+    Serial.print("failed, rc=");
+    Serial.println(mqtt.state());
+  }
+}
+
 void setupRoutes() {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "text/html", htmlPage());
@@ -300,6 +441,15 @@ void setup() {
   ac.setFan(fanState);
 
   connectWiFi();
+
+  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+  mqtt.setCallback(handleMqttMessage);
+  mqtt.setBufferSize(512);
+
+#if MQTT_USE_TLS_VALUE
+  espClient.setInsecure();
+#endif
+
   setupCors();
   setupRoutes();
   server.begin();
@@ -308,4 +458,23 @@ void setup() {
 }
 
 void loop() {
+  unsigned long now = millis();
+
+  if (WiFi.status() != WL_CONNECTED && now - lastWifiRetry >= WIFI_RETRY_INTERVAL) {
+    lastWifiRetry = now;
+    connectWiFi();
+  }
+
+  if (WiFi.status() == WL_CONNECTED && !mqtt.connected()) {
+    connectMQTT();
+  }
+
+  if (mqtt.connected()) {
+    mqtt.loop();
+  }
+
+  if (mqtt.connected() && now - lastMqttStatus >= MQTT_STATUS_INTERVAL) {
+    lastMqttStatus = now;
+    publishAcStatus();
+  }
 }

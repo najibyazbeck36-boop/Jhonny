@@ -10,6 +10,8 @@ const DEFAULT_SETTINGS = {
   mqttPassword: "",
   apiUrl: "http://192.168.1.50/api",
   irUrl: "",
+  irCommandTopic: "centralcommand/room1/ac/cmd",
+  irStatusTopic: "centralcommand/room1/ac/status",
   targets: {
     air: { min: 18, max: 24 },
     humidity: { min: 85, max: 95 },
@@ -20,9 +22,13 @@ const DEFAULT_SETTINGS = {
 const state = {
   settings: loadSettings(),
   mqttClient: null,
+  irMqttClient: null,
+  irMqttConnectPromise: null,
   timer: null,
   irTimer: null,
   irBusy: false,
+  irMqttConnected: false,
+  irDeviceOnline: false,
   connected: false,
   connectionText: "Starting",
   lastContactAt: null,
@@ -73,6 +79,8 @@ function cacheElements() {
     "mqttPasswordInput",
     "apiUrlInput",
     "irUrlInput",
+    "irCommandTopicInput",
+    "irStatusTopicInput",
     "airMinInput",
     "airMaxInput",
     "humidityMinInput",
@@ -180,6 +188,8 @@ function hydrateSettingsForm() {
   els.mqttPasswordInput.value = settings.mqttPassword;
   els.apiUrlInput.value = settings.apiUrl;
   els.irUrlInput.value = settings.irUrl || "";
+  els.irCommandTopicInput.value = settings.irCommandTopic || defaultIrCommandTopic(settings.mqttTopic);
+  els.irStatusTopicInput.value = settings.irStatusTopic || defaultIrStatusTopic(settings.mqttTopic);
   els.airMinInput.value = settings.targets.air.min;
   els.airMaxInput.value = settings.targets.air.max;
   els.humidityMinInput.value = settings.targets.humidity.min;
@@ -199,6 +209,8 @@ function readSettingsForm() {
   settings.mqttPassword = els.mqttPasswordInput.value;
   settings.apiUrl = els.apiUrlInput.value.trim() || DEFAULT_SETTINGS.apiUrl;
   settings.irUrl = normalizeDeviceUrl(els.irUrlInput.value);
+  settings.irCommandTopic = els.irCommandTopicInput.value.trim() || defaultIrCommandTopic(settings.mqttTopic);
+  settings.irStatusTopic = els.irStatusTopicInput.value.trim() || defaultIrStatusTopic(settings.mqttTopic);
   settings.targets.air.min = numberOrDefault(els.airMinInput.value, DEFAULT_SETTINGS.targets.air.min);
   settings.targets.air.max = numberOrDefault(els.airMaxInput.value, DEFAULT_SETTINGS.targets.air.max);
   settings.targets.humidity.min = numberOrDefault(els.humidityMinInput.value, DEFAULT_SETTINGS.targets.humidity.min);
@@ -243,14 +255,26 @@ function stopDataSource() {
 
 function startIrPolling() {
   stopIrPolling();
-  renderIrUnavailable("Set URL", "Set AC ESP URL in Settings.");
 
-  if (!state.settings.irUrl) {
+  if (canUseIrHttp()) {
+    renderIrUnavailable("Checking", "Checking AC ESP32 by local HTTP.");
+    loadIrStatus();
+    state.irTimer = setInterval(loadIrStatus, 10000);
     return;
   }
 
-  loadIrStatus();
-  state.irTimer = setInterval(loadIrStatus, 10000);
+  if (hasIrMqttSettings()) {
+    renderIrUnavailable("MQTT", "Connecting to AC ESP32 by MQTT.");
+    requestIrMqttStatus();
+    return;
+  }
+
+  if (state.settings.irUrl && isHttpsPageWithHttpDevice(state.settings.irUrl)) {
+    renderIrUnavailable("Set MQTT", "Direct HTTP is blocked. Add AC MQTT topics in Settings.");
+    return;
+  }
+
+  renderIrUnavailable("Set control", "Set AC ESP URL or AC MQTT topics in Settings.");
 }
 
 function stopIrPolling() {
@@ -258,19 +282,30 @@ function stopIrPolling() {
     clearInterval(state.irTimer);
     state.irTimer = null;
   }
+
+  stopIrMqtt();
 }
 
 async function loadIrStatus() {
-  if (!state.settings.irUrl) {
-    renderIrUnavailable("Set URL", "Set AC ESP URL in Settings.");
+  if (canUseIrHttp()) {
+    await loadIrHttpStatus();
     return;
   }
 
-  if (isHttpsPageWithHttpDevice(state.settings.irUrl)) {
-    renderIrUnavailable("HTTPS blocked", "Direct HTTP control is blocked from this HTTPS page.");
+  if (hasIrMqttSettings()) {
+    await requestIrMqttStatus();
     return;
   }
 
+  if (state.settings.irUrl && isHttpsPageWithHttpDevice(state.settings.irUrl)) {
+    renderIrUnavailable("Set MQTT", "Direct HTTP is blocked. Add AC MQTT topics in Settings.");
+    return;
+  }
+
+  renderIrUnavailable("Set control", "Set AC ESP URL or AC MQTT topics in Settings.");
+}
+
+async function loadIrHttpStatus() {
   try {
     setIrBadge("Checking", "warn");
     const response = await fetch(`${state.settings.irUrl}/status`, { cache: "no-store" });
@@ -287,16 +322,25 @@ async function loadIrStatus() {
 }
 
 async function sendIrCommand(command) {
-  if (!state.settings.irUrl) {
-    renderIrUnavailable("Set URL", "Set AC ESP URL in Settings before sending commands.");
+  if (canUseIrHttp()) {
+    await sendIrHttpCommand(command);
     return;
   }
 
-  if (isHttpsPageWithHttpDevice(state.settings.irUrl)) {
-    renderIrUnavailable("HTTPS blocked", "Direct HTTP control is blocked from this HTTPS page.");
+  if (hasIrMqttSettings()) {
+    await sendIrMqttCommand(command);
     return;
   }
 
+  if (state.settings.irUrl && isHttpsPageWithHttpDevice(state.settings.irUrl)) {
+    renderIrUnavailable("Set MQTT", "Direct HTTP is blocked. Add AC MQTT topics in Settings.");
+    return;
+  }
+
+  renderIrUnavailable("Set control", "Set AC ESP URL or AC MQTT topics in Settings before sending commands.");
+}
+
+async function sendIrHttpCommand(command) {
   state.irBusy = true;
   setIrControlsEnabled(false);
   setIrBadge("Sending", "warn");
@@ -322,6 +366,177 @@ async function sendIrCommand(command) {
   }
 }
 
+async function requestIrMqttStatus() {
+  try {
+    setIrBadge("MQTT", "warn");
+    els.acLog.textContent = "Connecting to AC ESP32 by MQTT.";
+    const client = await ensureIrMqtt();
+    await publishIrMqttMessage(client, "status");
+    els.acLog.textContent = "Waiting for AC ESP32 MQTT status.";
+  } catch (error) {
+    renderIrUnavailable("MQTT offline", readableError(error));
+  }
+}
+
+async function sendIrMqttCommand(command) {
+  state.irBusy = true;
+  setIrControlsEnabled(false);
+  setIrBadge("Sending", "warn");
+  els.acLog.textContent = `Publishing ${formatCommand(command)} by MQTT...`;
+
+  try {
+    const client = await ensureIrMqtt();
+    await publishIrMqttMessage(client, command);
+    els.acLog.textContent = `MQTT command sent: ${formatCommand(command)}`;
+  } catch (error) {
+    renderIrUnavailable("MQTT offline", readableError(error));
+  } finally {
+    state.irBusy = false;
+    setIrControlsEnabled(canUseIrCommand());
+  }
+}
+
+function ensureIrMqtt() {
+  if (state.irMqttClient?.connected) {
+    return Promise.resolve(state.irMqttClient);
+  }
+
+  if (state.irMqttConnectPromise) {
+    return state.irMqttConnectPromise;
+  }
+
+  if (!hasIrMqttSettings()) {
+    return Promise.reject(new Error("Missing AC MQTT settings"));
+  }
+
+  if (!window.mqtt) {
+    return Promise.reject(new Error("MQTT library unavailable"));
+  }
+
+  stopIrMqtt();
+
+  const options = {
+    clean: true,
+    connectTimeout: 8000,
+    reconnectPeriod: 3000,
+    clientId: `mushroom-ac-${Math.random().toString(16).slice(2)}`
+  };
+
+  if (state.settings.mqttUser) {
+    options.username = state.settings.mqttUser;
+    options.password = state.settings.mqttPassword;
+  }
+
+  const client = mqtt.connect(state.settings.mqttUrl, options);
+  state.irMqttClient = client;
+  state.irMqttConnected = false;
+  state.irDeviceOnline = false;
+
+  client.on("connect", () => {
+    state.irMqttConnected = true;
+    state.irDeviceOnline = false;
+    setIrBadge("MQTT", "warn");
+    els.acLog.textContent = "MQTT connected. Waiting for AC ESP32.";
+
+    if (state.settings.irStatusTopic) {
+      client.subscribe(state.settings.irStatusTopic);
+    }
+
+    setIrControlsEnabled(false);
+  });
+
+  client.on("message", (topic, message) => {
+    if (topic === state.settings.irStatusTopic) {
+      handleIrMqttStatus(message.toString());
+    }
+  });
+
+  client.on("reconnect", () => {
+    state.irMqttConnected = false;
+    state.irDeviceOnline = false;
+    setIrBadge("MQTT", "warn");
+    els.acLog.textContent = "Reconnecting to AC MQTT.";
+    setIrControlsEnabled(false);
+  });
+
+  client.on("offline", () => {
+    state.irMqttConnected = false;
+    state.irDeviceOnline = false;
+    renderIrUnavailable("MQTT offline", "MQTT broker disconnected.");
+  });
+
+  client.on("error", (error) => {
+    state.irMqttConnected = false;
+    state.irDeviceOnline = false;
+    renderIrUnavailable("MQTT error", readableError(error));
+  });
+
+  state.irMqttConnectPromise = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("MQTT timeout"));
+    }, 9000);
+
+    client.once("connect", () => {
+      clearTimeout(timeout);
+      resolve(client);
+    });
+
+    client.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  }).finally(() => {
+    state.irMqttConnectPromise = null;
+  });
+
+  return state.irMqttConnectPromise;
+}
+
+function stopIrMqtt() {
+  if (state.irMqttClient) {
+    state.irMqttClient.end(true);
+    state.irMqttClient = null;
+  }
+
+  state.irMqttConnectPromise = null;
+  state.irMqttConnected = false;
+  state.irDeviceOnline = false;
+}
+
+function publishIrMqttMessage(client, command) {
+  return new Promise((resolve, reject) => {
+    client.publish(state.settings.irCommandTopic, command, { qos: 0, retain: false }, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+function handleIrMqttStatus(message) {
+  const text = message.trim();
+
+  if (text.toLowerCase() === "offline") {
+    state.irDeviceOnline = false;
+    renderIrUnavailable("AC offline", "AC ESP32 is offline on MQTT.");
+    return;
+  }
+
+  try {
+    const status = normalizeIrStatus(JSON.parse(text));
+    state.irDeviceOnline = true;
+    renderIrStatus(status);
+    setIrBadge("MQTT online", "ok");
+    els.acLog.textContent = "AC status received by MQTT.";
+  } catch {
+    state.irDeviceOnline = false;
+    renderIrUnavailable("Bad status", "AC MQTT status was not valid JSON.");
+  }
+}
+
 function normalizeIrStatus(payload) {
   const temp = firstNumber(payload.temp, payload.temperature, payload.ac_temperature);
 
@@ -338,7 +553,7 @@ function renderIrStatus(status) {
   els.acPower.textContent = status.power;
   els.acMode.textContent = status.mode;
   els.acFan.textContent = status.fan;
-  setIrControlsEnabled(Boolean(state.settings.irUrl) && !state.irBusy);
+  setIrControlsEnabled(canUseIrCommand() && !state.irBusy);
   updateIrSelections(status);
 }
 
@@ -349,7 +564,7 @@ function renderIrUnavailable(label, logMessage) {
   els.acMode.textContent = "--";
   els.acFan.textContent = "--";
   els.acLog.textContent = logMessage;
-  setIrControlsEnabled(Boolean(state.settings.irUrl) && !state.irBusy);
+  setIrControlsEnabled(canUseIrCommand() && !state.irBusy);
   updateIrSelections(null);
 }
 
@@ -362,7 +577,7 @@ function setIrControlsEnabled(enabled) {
   els.irCommandButtons.forEach((button) => {
     button.disabled = !enabled;
   });
-  els.irRefreshButton.disabled = state.irBusy || !state.settings.irUrl;
+  els.irRefreshButton.disabled = state.irBusy || (!canUseIrHttp() && !hasIrMqttSettings());
 }
 
 function updateIrSelections(status) {
@@ -412,6 +627,35 @@ function normalizeDeviceUrl(value) {
   }
 
   return url.replace(/\/+$/, "");
+}
+
+function defaultIrBaseTopic(mqttTopic) {
+  const topic = mqttTopic || DEFAULT_SETTINGS.mqttTopic;
+  if (topic.endsWith("/sensors")) {
+    return topic.replace(/\/sensors$/, "/ac");
+  }
+
+  return "centralcommand/room1/ac";
+}
+
+function defaultIrCommandTopic(mqttTopic) {
+  return `${defaultIrBaseTopic(mqttTopic)}/cmd`;
+}
+
+function defaultIrStatusTopic(mqttTopic) {
+  return `${defaultIrBaseTopic(mqttTopic)}/status`;
+}
+
+function canUseIrHttp() {
+  return Boolean(state.settings.irUrl) && !isHttpsPageWithHttpDevice(state.settings.irUrl);
+}
+
+function hasIrMqttSettings() {
+  return Boolean(state.settings.mqttUrl && state.settings.irCommandTopic && state.settings.irStatusTopic);
+}
+
+function canUseIrCommand() {
+  return canUseIrHttp() || (state.irMqttConnected && state.irDeviceOnline);
 }
 
 function isHttpsPageWithHttpDevice(deviceUrl) {
