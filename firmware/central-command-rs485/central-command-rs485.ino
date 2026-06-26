@@ -202,8 +202,8 @@ void connectMQTT() {
 
 // ===================== READ SHT20 =====================
 // Common SHT20 RS485 format:
-// register 0x0001 = humidity x10
-// register 0x0002 = temperature x10
+// register 0x0001 = temperature x10
+// register 0x0002 = humidity x10
 bool readSHT20() {
   if (!ENABLE_SHT20) {
     sht20Online = false;
@@ -215,8 +215,8 @@ bool readSHT20() {
   uint8_t result = node.readInputRegisters(0x0001, 2);
 
   if (result == node.ku8MBSuccess) {
-    uint16_t rawHum = node.getResponseBuffer(0);
-    int16_t rawTemp = (int16_t)node.getResponseBuffer(1);
+    int16_t rawTemp = (int16_t)node.getResponseBuffer(0);
+    uint16_t rawHum = node.getResponseBuffer(1);
 
     sht20Hum = rawHum / 10.0;
     sht20Temp = rawTemp / 10.0;
