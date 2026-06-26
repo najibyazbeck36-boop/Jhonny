@@ -1,5 +1,6 @@
 const STORAGE_KEY = "mushroom-climate-dashboard-settings";
 const MAX_HISTORY = 80;
+const ESP32_STALE_MS = 15000;
 
 const DEFAULT_SETTINGS = {
   source: "demo",
@@ -24,6 +25,7 @@ const state = {
   irBusy: false,
   connected: false,
   connectionText: "Starting",
+  lastContactAt: null,
   lastReading: null,
   history: {
     air: [],
@@ -71,8 +73,6 @@ function cacheElements() {
     "mqttPasswordInput",
     "apiUrlInput",
     "irUrlInput",
-    "acUrlInput",
-    "acConnectButton",
     "airMinInput",
     "airMaxInput",
     "humidityMinInput",
@@ -104,17 +104,6 @@ function bindEvents() {
   els.closeSettingsButton.addEventListener("click", closeSettings);
   els.connectButton.addEventListener("click", startDataSource);
   els.irRefreshButton.addEventListener("click", loadIrStatus);
-  els.acConnectButton.addEventListener("click", () => {
-    saveIrUrlFromPanel();
-    loadIrStatus();
-  });
-  els.acUrlInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      saveIrUrlFromPanel();
-      loadIrStatus();
-    }
-  });
   els.irCommandButtons.forEach((button) => {
     button.addEventListener("click", () => sendIrCommand(button.dataset.irCmd));
   });
@@ -191,7 +180,6 @@ function hydrateSettingsForm() {
   els.mqttPasswordInput.value = settings.mqttPassword;
   els.apiUrlInput.value = settings.apiUrl;
   els.irUrlInput.value = settings.irUrl || "";
-  els.acUrlInput.value = settings.irUrl || "";
   els.airMinInput.value = settings.targets.air.min;
   els.airMaxInput.value = settings.targets.air.max;
   els.humidityMinInput.value = settings.targets.humidity.min;
@@ -224,6 +212,7 @@ function startDataSource() {
   stopDataSource();
   state.connected = false;
   state.connectionText = "Connecting";
+  state.lastContactAt = null;
   state.lastReading = null;
   updateSystemLabels();
 
@@ -254,8 +243,7 @@ function stopDataSource() {
 
 function startIrPolling() {
   stopIrPolling();
-  mirrorIrUrlInputs();
-  renderIrUnavailable("Set URL", "Enter AC ESP URL, then press Connect.");
+  renderIrUnavailable("Set URL", "Set AC ESP URL in Settings.");
 
   if (!state.settings.irUrl) {
     return;
@@ -272,47 +260,9 @@ function stopIrPolling() {
   }
 }
 
-function saveIrUrlFromPanel(options = {}) {
-  const nextUrl = normalizeDeviceUrl(els.acUrlInput.value);
-
-  if (nextUrl === state.settings.irUrl) {
-    mirrorIrUrlInputs();
-    return Boolean(nextUrl);
-  }
-
-  state.settings.irUrl = nextUrl;
-  saveSettings();
-  mirrorIrUrlInputs();
-
-  if (!options.silent) {
-    stopIrPolling();
-    if (nextUrl) {
-      state.irTimer = setInterval(loadIrStatus, 10000);
-    }
-  }
-
-  return Boolean(nextUrl);
-}
-
-function mirrorIrUrlInputs() {
-  const value = state.settings.irUrl || "";
-  els.acUrlInput.value = value;
-  els.irUrlInput.value = value;
-}
-
-function focusAcUrlInput() {
-  els.acUrlInput.focus();
-  els.acUrlInput.classList.remove("attention");
-  requestAnimationFrame(() => {
-    els.acUrlInput.classList.add("attention");
-  });
-}
-
 async function loadIrStatus() {
-  saveIrUrlFromPanel({ silent: true });
-
   if (!state.settings.irUrl) {
-    renderIrUnavailable("Set URL", "Enter AC ESP URL, then press Connect.");
+    renderIrUnavailable("Set URL", "Set AC ESP URL in Settings.");
     return;
   }
 
@@ -337,11 +287,8 @@ async function loadIrStatus() {
 }
 
 async function sendIrCommand(command) {
-  saveIrUrlFromPanel({ silent: true });
-
   if (!state.settings.irUrl) {
-    renderIrUnavailable("Set URL", "Enter AC ESP URL before sending commands.");
-    focusAcUrlInput();
+    renderIrUnavailable("Set URL", "Set AC ESP URL in Settings before sending commands.");
     return;
   }
 
@@ -402,7 +349,7 @@ function renderIrUnavailable(label, logMessage) {
   els.acMode.textContent = "--";
   els.acFan.textContent = "--";
   els.acLog.textContent = logMessage;
-  setIrControlsEnabled(true);
+  setIrControlsEnabled(Boolean(state.settings.irUrl) && !state.irBusy);
   updateIrSelections(null);
 }
 
@@ -415,8 +362,7 @@ function setIrControlsEnabled(enabled) {
   els.irCommandButtons.forEach((button) => {
     button.disabled = !enabled;
   });
-  els.irRefreshButton.disabled = state.irBusy;
-  els.acConnectButton.disabled = state.irBusy;
+  els.irRefreshButton.disabled = state.irBusy || !state.settings.irUrl;
 }
 
 function updateIrSelections(status) {
@@ -511,10 +457,11 @@ function startApiPolling() {
       const payload = await response.json();
       state.connected = true;
       state.connectionText = "Online";
+      state.lastContactAt = Date.now();
       applyPayload(payload);
     } catch (error) {
       state.connected = false;
-      state.connectionText = readableError(error);
+      state.connectionText = esp32ConnectionError(error);
       updateSystemLabels();
     }
   };
@@ -550,20 +497,30 @@ function startMqtt() {
   state.mqttClient = mqtt.connect(state.settings.mqttUrl, options);
 
   state.mqttClient.on("connect", () => {
-    state.connected = true;
-    state.connectionText = "Online";
-    state.mqttClient.subscribe(state.settings.mqttTopic);
+    state.connected = false;
+    state.connectionText = "Waiting for ESP32 data";
+    state.lastContactAt = Date.now();
+    mqttTopics().forEach((topic) => state.mqttClient.subscribe(topic));
     updateSystemLabels();
   });
 
   state.mqttClient.on("message", (topic, message) => {
+    if (topic === mqttStatusTopic()) {
+      handleMqttStatus(message.toString());
+      return;
+    }
+
     if (topic !== state.settings.mqttTopic) {
       return;
     }
 
     try {
+      state.connected = true;
+      state.connectionText = "Online";
+      state.lastContactAt = Date.now();
       applyPayload(JSON.parse(message.toString()));
     } catch (error) {
+      state.connected = false;
       state.connectionText = "Bad JSON";
       updateSystemLabels();
     }
@@ -586,6 +543,8 @@ function startMqtt() {
     state.connectionText = readableError(error);
     updateSystemLabels();
   });
+
+  state.timer = setInterval(checkEsp32Freshness, 3000);
 }
 
 function applyPayload(payload) {
@@ -593,6 +552,7 @@ function applyPayload(payload) {
   const now = new Date();
   reading.receivedAt = now;
   state.lastReading = reading;
+  state.lastContactAt = now.getTime();
 
   pushHistory("air", reading.airTemp);
   pushHistory("humidity", reading.humidity);
@@ -600,6 +560,52 @@ function applyPayload(payload) {
 
   renderReading(reading);
   drawAllSparklines();
+}
+
+function mqttTopics() {
+  return Array.from(new Set([state.settings.mqttTopic, mqttStatusTopic()].filter(Boolean)));
+}
+
+function mqttStatusTopic() {
+  if (!state.settings.mqttTopic || !state.settings.mqttTopic.endsWith("/sensors")) {
+    return "";
+  }
+
+  return state.settings.mqttTopic.replace(/\/sensors$/, "/status");
+}
+
+function handleMqttStatus(message) {
+  const status = message.trim().toLowerCase();
+  state.lastContactAt = Date.now();
+
+  if (status === "offline") {
+    state.connected = false;
+    state.connectionText = "ESP32 offline";
+    updateSystemLabels();
+    return;
+  }
+
+  if (status === "online") {
+    state.connectionText = state.lastReading ? "Online" : "Waiting for ESP32 data";
+    state.connected = Boolean(state.lastReading);
+    updateSystemLabels();
+  }
+}
+
+function checkEsp32Freshness() {
+  if (state.settings.source !== "mqtt" || !state.mqttClient?.connected) {
+    return;
+  }
+
+  if (state.lastContactAt && Date.now() - state.lastContactAt <= ESP32_STALE_MS) {
+    return;
+  }
+
+  if (state.connectionText !== "ESP32 offline") {
+    state.connected = false;
+    state.connectionText = "ESP32 offline";
+    updateSystemLabels();
+  }
 }
 
 function normalizePayload(payload) {
@@ -839,6 +845,14 @@ function readableError(error) {
 
   const message = error?.message || String(error);
   return message.length > 24 ? `${message.slice(0, 24)}...` : message;
+}
+
+function esp32ConnectionError(error) {
+  if (error?.name === "AbortError" || error?.name === "TypeError") {
+    return "ESP32 offline";
+  }
+
+  return readableError(error);
 }
 
 function debounce(callback, wait) {

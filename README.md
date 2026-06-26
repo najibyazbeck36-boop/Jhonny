@@ -178,7 +178,7 @@ The AC Control firmware in this repo has CORS headers enabled so the dashboard c
    - `AsyncTCP`
 4. Flash the second ESP32.
 5. Open the serial monitor and copy the printed `AC Control ESP IP`.
-6. Paste that address into the dashboard `AC ESP URL` field and press `Connect`.
+6. Paste that address into `Settings` -> `AC ESP URL` and press `Save`.
 
 If the dashboard is loaded from GitHub Pages over HTTPS, direct commands to a local `http://` ESP32 can be blocked by the browser. For direct HTTP control, open `index.html` locally or host the dashboard over HTTP on the same network. For public HTTPS control, put the AC Control ESP behind an HTTPS endpoint or add an MQTT command bridge.
 

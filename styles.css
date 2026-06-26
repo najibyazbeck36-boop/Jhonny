@@ -282,7 +282,6 @@ legend {
 
 .control-head,
 .control-actions,
-.ac-connection,
 .ir-layout,
 .ac-stat-grid,
 .control-group {
@@ -298,19 +297,6 @@ legend {
 .control-actions {
   align-items: center;
   flex-wrap: wrap;
-}
-
-.ac-connection {
-  align-items: end;
-  margin-top: 14px;
-}
-
-.ac-connection label {
-  flex: 1;
-}
-
-.ac-connection .button {
-  min-width: 118px;
 }
 
 .ir-layout {
@@ -628,11 +614,6 @@ input.attention {
 
   .control-head {
     align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .ac-connection {
-    align-items: stretch;
     flex-direction: column;
   }
 
