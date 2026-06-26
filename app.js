@@ -46,6 +46,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function cacheElements() {
   [
+    "sourceLabel",
+    "connectionLabel",
+    "lastUpdateLabel",
+    "deviceIpLabel",
     "airValue",
     "humidityValue",
     "substrateValue",
@@ -220,6 +224,7 @@ function startDataSource() {
   stopDataSource();
   state.connected = false;
   state.connectionText = "Connecting";
+  state.lastReading = null;
   updateSystemLabels();
 
   if (state.settings.source === "mqtt") {
@@ -656,6 +661,17 @@ function updateSystemLabels() {
   };
 
   const source = sourceNames[state.settings.source] || state.settings.source;
+  els.sourceLabel.textContent = source;
+  els.connectionLabel.textContent = state.connectionText;
+  els.connectionLabel.className = state.settings.source === "demo" ? "warn" : state.connected ? "ok" : "bad";
+  els.deviceIpLabel.textContent = state.lastReading?.ip || "--";
+  els.lastUpdateLabel.textContent = state.lastReading?.receivedAt
+    ? state.lastReading.receivedAt.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    })
+    : "--";
   els.connectButton.title = `${source}: ${state.connectionText}`;
 }
 

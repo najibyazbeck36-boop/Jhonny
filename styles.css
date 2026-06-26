@@ -129,6 +129,48 @@ h2 {
   font-weight: 800;
 }
 
+.status-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--line);
+}
+
+.status-item {
+  min-width: 0;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.status-item span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.status-item strong {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-item strong.ok {
+  color: var(--green);
+}
+
+.status-item strong.warn {
+  color: var(--amber);
+}
+
+.status-item strong.bad {
+  color: var(--red);
+}
+
 .metric-head,
 .target-line,
 label span,
@@ -556,6 +598,10 @@ input.attention {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .status-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .ir-layout {
     flex-direction: column;
   }
@@ -602,6 +648,7 @@ input.attention {
   }
 
   .metric-grid,
+  .status-strip,
   .form-grid,
   .range-grid {
     grid-template-columns: 1fr;
