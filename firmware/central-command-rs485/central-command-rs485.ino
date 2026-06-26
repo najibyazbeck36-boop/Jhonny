@@ -4,19 +4,55 @@
 #include <ModbusMaster.h>
 #include <ArduinoOTA.h>
 
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+
 // ===================== WIFI =====================
-const char* WIFI_SSID = "YOUR_WIFI_NAME";
-const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
+#ifndef WIFI_SSID_VALUE
+#define WIFI_SSID_VALUE "YOUR_WIFI_NAME"
+#endif
+
+#ifndef WIFI_PASS_VALUE
+#define WIFI_PASS_VALUE "YOUR_WIFI_PASSWORD"
+#endif
+
+const char* WIFI_SSID = WIFI_SSID_VALUE;
+const char* WIFI_PASS = WIFI_PASS_VALUE;
 
 // ===================== OTA =====================
-const char* OTA_HOSTNAME = "central-command-rs485";
-const char* OTA_PASSWORD = "CHANGE_THIS_PASSWORD";
+#ifndef OTA_HOSTNAME_VALUE
+#define OTA_HOSTNAME_VALUE "central-command-rs485"
+#endif
+
+#ifndef OTA_PASSWORD_VALUE
+#define OTA_PASSWORD_VALUE "CHANGE_THIS_PASSWORD"
+#endif
+
+const char* OTA_HOSTNAME = OTA_HOSTNAME_VALUE;
+const char* OTA_PASSWORD = OTA_PASSWORD_VALUE;
 
 // ===================== MQTT =====================
-const char* MQTT_SERVER = "192.168.1.100";
-const int MQTT_PORT = 1883;
-const char* MQTT_USER = "";
-const char* MQTT_PASS = "";
+#ifndef MQTT_SERVER_VALUE
+#define MQTT_SERVER_VALUE "192.168.1.100"
+#endif
+
+#ifndef MQTT_PORT_VALUE
+#define MQTT_PORT_VALUE 1883
+#endif
+
+#ifndef MQTT_USER_VALUE
+#define MQTT_USER_VALUE ""
+#endif
+
+#ifndef MQTT_PASS_VALUE
+#define MQTT_PASS_VALUE ""
+#endif
+
+const char* MQTT_SERVER = MQTT_SERVER_VALUE;
+const int MQTT_PORT = MQTT_PORT_VALUE;
+const char* MQTT_USER = MQTT_USER_VALUE;
+const char* MQTT_PASS = MQTT_PASS_VALUE;
 
 const char* MQTT_TOPIC_STATUS = "centralcommand/room1/status";
 const char* MQTT_TOPIC_DATA = "centralcommand/room1/sensors";
@@ -50,9 +86,11 @@ bool pt100Online = false;
 
 unsigned long lastRead = 0;
 unsigned long lastMqtt = 0;
+unsigned long lastWifiRetry = 0;
 
 const unsigned long READ_INTERVAL = 3000;
 const unsigned long MQTT_INTERVAL = 5000;
+const unsigned long WIFI_RETRY_INTERVAL = 30000;
 
 // ===================== RS485 DIRECTION =====================
 void preTransmission() {
@@ -66,20 +104,28 @@ void postTransmission() {
 }
 
 // ===================== WIFI =====================
-void connectWiFi() {
+bool connectWiFi(unsigned long timeoutMs = 20000) {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
   Serial.print("Connecting WiFi");
 
-  while (WiFi.status() != WL_CONNECTED) {
+  unsigned long startedAt = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startedAt < timeoutMs) {
     delay(500);
     Serial.print(".");
   }
 
   Serial.println();
-  Serial.print("WiFi connected. IP: ");
-  Serial.println(WiFi.localIP());
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("WiFi connected. IP: ");
+    Serial.println(WiFi.localIP());
+    return true;
+  }
+
+  Serial.println("WiFi failed. Continuing sensor reads offline.");
+  return false;
 }
 
 // ===================== OTA =====================
@@ -310,7 +356,7 @@ String webPage() {
       document.getElementById(id).innerHTML =
         value === null || value === undefined || isNaN(value)
           ? "--"
-          : Number(value).toFixed(1) + " <span class=\"unit\">" + unit + "</span>";
+          : Number(value).toFixed(1) + ' <span class="unit">' + unit + '</span>';
     }
 
     function showStatus(id, online) {
@@ -384,8 +430,9 @@ void setup() {
   node.preTransmission(preTransmission);
   node.postTransmission(postTransmission);
 
-  connectWiFi();
-  setupOTA();
+  if (connectWiFi()) {
+    setupOTA();
+  }
 
   mqtt.setServer(MQTT_SERVER, MQTT_PORT);
   mqtt.setBufferSize(512);
@@ -397,20 +444,28 @@ void setup() {
 
 // ===================== LOOP =====================
 void loop() {
-  ArduinoOTA.handle();
-  server.handleClient();
-
-  if (WiFi.status() != WL_CONNECTED) {
-    connectWiFi();
+  if (WiFi.status() == WL_CONNECTED) {
+    ArduinoOTA.handle();
   }
 
-  if (!mqtt.connected()) {
+  server.handleClient();
+
+  unsigned long now = millis();
+
+  if (WiFi.status() != WL_CONNECTED && now - lastWifiRetry >= WIFI_RETRY_INTERVAL) {
+    lastWifiRetry = now;
+    if (connectWiFi(5000)) {
+      setupOTA();
+    }
+  }
+
+  if (WiFi.status() == WL_CONNECTED && !mqtt.connected()) {
     connectMQTT();
   }
 
-  mqtt.loop();
-
-  unsigned long now = millis();
+  if (mqtt.connected()) {
+    mqtt.loop();
+  }
 
   if (now - lastRead >= READ_INTERVAL) {
     lastRead = now;
@@ -420,7 +475,7 @@ void loop() {
     readSHT20();
   }
 
-  if (now - lastMqtt >= MQTT_INTERVAL) {
+  if (WiFi.status() == WL_CONNECTED && now - lastMqtt >= MQTT_INTERVAL) {
     lastMqtt = now;
     publishMQTT();
   }

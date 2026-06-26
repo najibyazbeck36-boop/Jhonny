@@ -49,13 +49,39 @@ centralcommand/room1/sensors
 ## ESP32 Setup
 
 1. Open `firmware/central-command-rs485/central-command-rs485.ino`.
-2. Set WiFi, OTA, MQTT broker, and sensor Modbus IDs.
-3. Install these Arduino libraries:
+2. Copy `firmware/central-command-rs485/secrets.example.h` to `firmware/central-command-rs485/secrets.h`.
+3. Set WiFi, OTA, MQTT broker, and sensor Modbus IDs.
+4. In Arduino IDE, use `ESP32 Dev Module` and port `COM5` for the main controller.
+5. Install these Arduino libraries:
    - `PubSubClient`
    - `ModbusMaster`
    - `ArduinoOTA` from ESP32 core
-4. Flash the ESP32.
-5. Confirm the serial monitor shows sensor values and MQTT publishes.
+6. Flash the ESP32.
+7. Confirm the serial monitor shows sensor values and MQTT publishes.
+
+## Main Controller RS485 Wiring
+
+The main controller on `COM5` is only the USB programming/serial-monitor connection. Modbus uses the ESP32 UART2 pins in the firmware:
+
+```text
+ESP32 GPIO17 TX2 -> RS485 DI
+ESP32 GPIO16 RX2 <- RS485 RO
+ESP32 GPIO4      -> RS485 DE and RE tied together
+ESP32 GND       -> RS485 module GND and sensor power GND
+RS485 A         -> sensor A
+RS485 B         -> sensor B
+```
+
+Firmware defaults:
+
+```text
+Baud: 9600
+Serial: 8N1
+PT100 Modbus ID: 1
+SHT20 Modbus ID: 2
+```
+
+If a sensor stays offline, swap A/B first, then confirm the Modbus ID and register map. Use a 120 ohm termination resistor at the end of a longer RS485 line.
 
 ## Dashboard Setup
 
