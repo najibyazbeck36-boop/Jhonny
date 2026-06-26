@@ -63,10 +63,31 @@ const char* MQTT_TOPIC_DATA = "centralcommand/room1/sensors";
 #define RS485_DE_RE_PIN 4
 
 // ===================== MODBUS SETTINGS =====================
-#define MODBUS_BAUD 9600
+#ifndef MODBUS_BAUD_VALUE
+#define MODBUS_BAUD_VALUE 9600
+#endif
 
-#define PT100_ID 1
-#define SHT20_ID 2
+#ifndef PT100_ID_VALUE
+#define PT100_ID_VALUE 1
+#endif
+
+#ifndef SHT20_ID_VALUE
+#define SHT20_ID_VALUE 1
+#endif
+
+#ifndef ENABLE_PT100_VALUE
+#define ENABLE_PT100_VALUE 0
+#endif
+
+#ifndef ENABLE_SHT20_VALUE
+#define ENABLE_SHT20_VALUE 1
+#endif
+
+const uint32_t MODBUS_BAUD = MODBUS_BAUD_VALUE;
+const uint8_t PT100_ID = PT100_ID_VALUE;
+const uint8_t SHT20_ID = SHT20_ID_VALUE;
+const bool ENABLE_PT100 = ENABLE_PT100_VALUE;
+const bool ENABLE_SHT20 = ENABLE_SHT20_VALUE;
 
 // ===================== OBJECTS =====================
 HardwareSerial RS485Serial(2);
@@ -184,6 +205,11 @@ void connectMQTT() {
 // register 0x0001 = humidity x10
 // register 0x0002 = temperature x10
 bool readSHT20() {
+  if (!ENABLE_SHT20) {
+    sht20Online = false;
+    return false;
+  }
+
   node.begin(SHT20_ID, RS485Serial);
 
   uint8_t result = node.readInputRegisters(0x0001, 2);
@@ -215,6 +241,12 @@ bool readSHT20() {
 // Based on a common PT100 RS485 module:
 // register 0x0000 = temperature x10
 bool readPT100() {
+  if (!ENABLE_PT100) {
+    pt100Temp = NAN;
+    pt100Online = false;
+    return false;
+  }
+
   node.begin(PT100_ID, RS485Serial);
 
   uint8_t result = node.readInputRegisters(0x0000, 1);
@@ -427,6 +459,16 @@ void setup() {
 
   RS485Serial.begin(MODBUS_BAUD, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN);
 
+  Serial.println("Modbus RTU ready");
+  Serial.print("Baud: ");
+  Serial.println(MODBUS_BAUD);
+  Serial.print("SHT20: ");
+  Serial.print(ENABLE_SHT20 ? "enabled, ID " : "disabled, ID ");
+  Serial.println(SHT20_ID);
+  Serial.print("PT100: ");
+  Serial.print(ENABLE_PT100 ? "enabled, ID " : "disabled, ID ");
+  Serial.println(PT100_ID);
+
   node.preTransmission(preTransmission);
   node.postTransmission(postTransmission);
 
@@ -470,9 +512,14 @@ void loop() {
   if (now - lastRead >= READ_INTERVAL) {
     lastRead = now;
 
-    readPT100();
-    delay(200);
-    readSHT20();
+    if (ENABLE_PT100) {
+      readPT100();
+      delay(200);
+    }
+
+    if (ENABLE_SHT20) {
+      readSHT20();
+    }
   }
 
   if (WiFi.status() == WL_CONNECTED && now - lastMqtt >= MQTT_INTERVAL) {

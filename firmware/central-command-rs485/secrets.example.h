@@ -13,3 +13,13 @@
 #define MQTT_PORT_VALUE 1883
 #define MQTT_USER_VALUE ""
 #define MQTT_PASS_VALUE ""
+
+#define MODBUS_BAUD_VALUE 9600
+
+// For testing only the SHT20, leave PT100 disabled.
+// Many RS485 SHT20 sensors ship with Modbus ID 1.
+#define ENABLE_SHT20_VALUE 1
+#define SHT20_ID_VALUE 1
+
+#define ENABLE_PT100_VALUE 0
+#define PT100_ID_VALUE 1

@@ -83,6 +83,32 @@ SHT20 Modbus ID: 2
 
 If a sensor stays offline, swap A/B first, then confirm the Modbus ID and register map. Use a 120 ohm termination resistor at the end of a longer RS485 line.
 
+## Live SHT20 Test
+
+For a first SHT20-only test, upload the scanner:
+
+```powershell
+& "C:\Program Files\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe" upload -p COM5 --fqbn esp32:esp32:esp32 firmware/sht20-modbus-scanner
+```
+
+Open Serial Monitor at `115200`. A working connection prints `OK raw0=... raw1=...`.
+
+If every line shows `fail 0xE2`, the ESP32 is timing out waiting for a reply. Check:
+
+- Sensor has its own required power, often 5-24V, not just RS485 A/B.
+- Sensor power GND, MAX485 GND, and ESP32 GND are connected together.
+- ESP32 GPIO17 goes to MAX485 `DI` or `TXD`.
+- ESP32 GPIO16 goes to MAX485 `RO` or `RXD`.
+- ESP32 GPIO4 goes to both MAX485 `DE` and `/RE`.
+- Sensor `A`/`D+` goes to MAX485 `A`, and sensor `B`/`D-` goes to MAX485 `B`.
+- If it still times out, swap A and B.
+
+After the scanner finds the sensor, upload the main firmware again:
+
+```powershell
+& "C:\Program Files\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe" upload -p COM5 --fqbn esp32:esp32:esp32 firmware/central-command-rs485
+```
+
 ## Dashboard Setup
 
 Open `index.html`, then choose `Settings`.
