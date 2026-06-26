@@ -117,6 +117,41 @@ Use `MQTT WS` when the dashboard is hosted on GitHub Pages.
 
 Use `ESP32 API` only when the browser can reach the ESP32 over local HTTP. GitHub Pages is HTTPS, so many browsers block direct `http://esp32-ip/api` requests from a GitHub Pages page.
 
+## HiveMQ Cloud Setup
+
+Use HiveMQ Cloud for live data on the web:
+
+```text
+ESP32 -> HiveMQ Cloud MQTT TLS 8883 -> GitHub Pages dashboard over WSS 8884
+```
+
+In HiveMQ Cloud:
+
+1. Create a free Serverless cluster.
+2. Create MQTT access credentials.
+3. Copy the cluster host from the cluster connection details.
+4. Put these values in local `firmware/central-command-rs485/secrets.h`:
+
+```c
+#define MQTT_SERVER_VALUE "your-cluster-host.s1.eu.hivemq.cloud"
+#define MQTT_PORT_VALUE 8883
+#define MQTT_USER_VALUE "your-hivemq-username"
+#define MQTT_PASS_VALUE "your-hivemq-password"
+#define MQTT_USE_TLS_VALUE 1
+```
+
+Then upload the main controller firmware to `COM5`.
+
+In the web dashboard `Settings`, choose:
+
+```text
+Data source: MQTT WS
+MQTT WebSocket URL: wss://your-cluster-host.s1.eu.hivemq.cloud:8884/mqtt
+MQTT topic: centralcommand/room1/sensors
+MQTT username: your-hivemq-username
+MQTT password: your-hivemq-password
+```
+
 Set `AC ESP URL` to the second ESP32 address, for example:
 
 ```text

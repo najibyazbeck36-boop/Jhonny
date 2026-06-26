@@ -1,4 +1,5 @@
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <WebServer.h>
 #include <PubSubClient.h>
 #include <ModbusMaster.h>
@@ -49,10 +50,15 @@ const char* OTA_PASSWORD = OTA_PASSWORD_VALUE;
 #define MQTT_PASS_VALUE ""
 #endif
 
+#ifndef MQTT_USE_TLS_VALUE
+#define MQTT_USE_TLS_VALUE 1
+#endif
+
 const char* MQTT_SERVER = MQTT_SERVER_VALUE;
 const int MQTT_PORT = MQTT_PORT_VALUE;
 const char* MQTT_USER = MQTT_USER_VALUE;
 const char* MQTT_PASS = MQTT_PASS_VALUE;
+const bool MQTT_USE_TLS = MQTT_USE_TLS_VALUE;
 
 const char* MQTT_TOPIC_STATUS = "centralcommand/room1/status";
 const char* MQTT_TOPIC_DATA = "centralcommand/room1/sensors";
@@ -93,7 +99,12 @@ const bool ENABLE_SHT20 = ENABLE_SHT20_VALUE;
 HardwareSerial RS485Serial(2);
 ModbusMaster node;
 
+#if MQTT_USE_TLS_VALUE
+WiFiClientSecure espClient;
+#else
 WiFiClient espClient;
+#endif
+
 PubSubClient mqtt(espClient);
 WebServer server(80);
 
@@ -478,6 +489,11 @@ void setup() {
 
   mqtt.setServer(MQTT_SERVER, MQTT_PORT);
   mqtt.setBufferSize(512);
+
+#if MQTT_USE_TLS_VALUE
+  // HiveMQ Cloud requires TLS on port 8883. For production, replace this with a pinned CA certificate.
+  espClient.setInsecure();
+#endif
 
   setupWebServer();
 
