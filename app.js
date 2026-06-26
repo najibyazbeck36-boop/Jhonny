@@ -67,6 +67,8 @@ function cacheElements() {
     "mqttPasswordInput",
     "apiUrlInput",
     "irUrlInput",
+    "acUrlInput",
+    "acConnectButton",
     "airMinInput",
     "airMaxInput",
     "humidityMinInput",
@@ -98,6 +100,17 @@ function bindEvents() {
   els.closeSettingsButton.addEventListener("click", closeSettings);
   els.connectButton.addEventListener("click", startDataSource);
   els.irRefreshButton.addEventListener("click", loadIrStatus);
+  els.acConnectButton.addEventListener("click", () => {
+    saveIrUrlFromPanel();
+    loadIrStatus();
+  });
+  els.acUrlInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveIrUrlFromPanel();
+      loadIrStatus();
+    }
+  });
   els.irCommandButtons.forEach((button) => {
     button.addEventListener("click", () => sendIrCommand(button.dataset.irCmd));
   });
@@ -174,6 +187,7 @@ function hydrateSettingsForm() {
   els.mqttPasswordInput.value = settings.mqttPassword;
   els.apiUrlInput.value = settings.apiUrl;
   els.irUrlInput.value = settings.irUrl || "";
+  els.acUrlInput.value = settings.irUrl || "";
   els.airMinInput.value = settings.targets.air.min;
   els.airMaxInput.value = settings.targets.air.max;
   els.humidityMinInput.value = settings.targets.humidity.min;
@@ -235,7 +249,8 @@ function stopDataSource() {
 
 function startIrPolling() {
   stopIrPolling();
-  renderIrUnavailable("Set URL", "Configure IR Blaster URL in Settings.");
+  mirrorIrUrlInputs();
+  renderIrUnavailable("Set URL", "Enter AC ESP URL, then press Connect.");
 
   if (!state.settings.irUrl) {
     return;
@@ -252,9 +267,47 @@ function stopIrPolling() {
   }
 }
 
+function saveIrUrlFromPanel(options = {}) {
+  const nextUrl = normalizeDeviceUrl(els.acUrlInput.value);
+
+  if (nextUrl === state.settings.irUrl) {
+    mirrorIrUrlInputs();
+    return Boolean(nextUrl);
+  }
+
+  state.settings.irUrl = nextUrl;
+  saveSettings();
+  mirrorIrUrlInputs();
+
+  if (!options.silent) {
+    stopIrPolling();
+    if (nextUrl) {
+      state.irTimer = setInterval(loadIrStatus, 10000);
+    }
+  }
+
+  return Boolean(nextUrl);
+}
+
+function mirrorIrUrlInputs() {
+  const value = state.settings.irUrl || "";
+  els.acUrlInput.value = value;
+  els.irUrlInput.value = value;
+}
+
+function focusAcUrlInput() {
+  els.acUrlInput.focus();
+  els.acUrlInput.classList.remove("attention");
+  requestAnimationFrame(() => {
+    els.acUrlInput.classList.add("attention");
+  });
+}
+
 async function loadIrStatus() {
+  saveIrUrlFromPanel({ silent: true });
+
   if (!state.settings.irUrl) {
-    renderIrUnavailable("Set URL", "Configure IR Blaster URL in Settings.");
+    renderIrUnavailable("Set URL", "Enter AC ESP URL, then press Connect.");
     return;
   }
 
@@ -279,8 +332,11 @@ async function loadIrStatus() {
 }
 
 async function sendIrCommand(command) {
+  saveIrUrlFromPanel({ silent: true });
+
   if (!state.settings.irUrl) {
-    renderIrUnavailable("Set URL", "Configure IR Blaster URL in Settings.");
+    renderIrUnavailable("Set URL", "Enter AC ESP URL before sending commands.");
+    focusAcUrlInput();
     return;
   }
 
@@ -310,7 +366,7 @@ async function sendIrCommand(command) {
     renderIrUnavailable("Offline", readableError(error));
   } finally {
     state.irBusy = false;
-    setIrControlsEnabled(Boolean(state.settings.irUrl));
+    setIrControlsEnabled(true);
   }
 }
 
@@ -341,7 +397,7 @@ function renderIrUnavailable(label, logMessage) {
   els.acMode.textContent = "--";
   els.acFan.textContent = "--";
   els.acLog.textContent = logMessage;
-  setIrControlsEnabled(false);
+  setIrControlsEnabled(true);
   updateIrSelections(null);
 }
 
@@ -354,7 +410,8 @@ function setIrControlsEnabled(enabled) {
   els.irCommandButtons.forEach((button) => {
     button.disabled = !enabled;
   });
-  els.irRefreshButton.disabled = !state.settings.irUrl || state.irBusy;
+  els.irRefreshButton.disabled = state.irBusy;
+  els.acConnectButton.disabled = state.irBusy;
 }
 
 function updateIrSelections(status) {

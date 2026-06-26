@@ -63,11 +63,11 @@
         </article>
       </section>
 
-      <section class="control-panel" aria-label="IR blaster AC controls">
+      <section class="control-panel" aria-label="AC controls">
         <div class="control-head">
           <div>
-            <p class="kicker">IR Blaster</p>
-            <h2>NEOCLIMA AC Controller</h2>
+            <p class="kicker">AC Control</p>
+            <h2>NEOCLIMA</h2>
           </div>
           <div class="control-actions">
             <span class="pill" id="irBadge">Set URL</span>
@@ -75,8 +75,21 @@
           </div>
         </div>
 
+        <div class="ac-connection">
+          <label>
+            <span>AC ESP URL</span>
+            <input id="acUrlInput" type="url" placeholder="http://192.168.1.60">
+          </label>
+          <button class="button primary" type="button" id="acConnectButton">Connect</button>
+        </div>
+
         <div class="ir-layout">
           <div class="ac-display">
+            <div class="ac-unit-graphic" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
             <div class="ac-temp">
               <strong id="acTemp">--</strong>
               <span>deg C</span>
@@ -95,7 +108,7 @@
                 <strong id="acFan">--</strong>
               </div>
             </div>
-            <p class="command-log" id="acLog">Configure IR Blaster URL in Settings.</p>
+            <p class="command-log" id="acLog">Enter AC ESP URL, then press Connect.</p>
           </div>
 
           <div class="ac-controls">
@@ -178,7 +191,7 @@
           <input id="apiUrlInput" type="url" placeholder="http://192.168.1.50/api">
         </label>
         <label class="wide">
-          <span>IR Blaster URL</span>
+          <span>AC ESP URL</span>
           <input id="irUrlInput" type="url" placeholder="http://192.168.1.60">
         </label>
       </div>

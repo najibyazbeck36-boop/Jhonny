@@ -8,7 +8,7 @@ The dashboard shows only three cards:
 - Air humidity from SHT20
 - Compost temperature from PT100
 
-It also includes a NEOCLIMA AC control panel for a second ESP32 IR blaster.
+It also includes an AC Control panel for a second ESP32 that sends NEOCLIMA IR commands.
 
 The ESP32 firmware reads:
 
@@ -23,7 +23,7 @@ It publishes JSON to MQTT and exposes the same JSON at `/api`.
 - `styles.css` - dashboard styling
 - `app.js` - dashboard logic, MQTT WebSocket client, ESP32 API polling, demo mode
 - `firmware/central-command-rs485/central-command-rs485.ino` - ESP32 firmware
-- `firmware/neoclima-ir-blaster/neoclima-ir-blaster.ino` - ESP32 IR blaster firmware
+- `firmware/neoclima-ir-blaster/neoclima-ir-blaster.ino` - ESP32 AC Control / IR sender firmware
 
 ## Recommended Data Path
 
@@ -65,7 +65,7 @@ Use `MQTT WS` when the dashboard is hosted on GitHub Pages.
 
 Use `ESP32 API` only when the browser can reach the ESP32 over local HTTP. GitHub Pages is HTTPS, so many browsers block direct `http://esp32-ip/api` requests from a GitHub Pages page.
 
-Set `IR Blaster URL` to the second ESP32 address, for example:
+Set `AC ESP URL` to the second ESP32 address, for example:
 
 ```text
 http://192.168.1.60
@@ -79,9 +79,9 @@ GET /cmd?c=on
 GET /cmd?c=temp:24
 ```
 
-The IR firmware in this repo has CORS headers enabled so the dashboard can call it from another web page.
+The AC Control firmware in this repo has CORS headers enabled so the dashboard can call it from another web page.
 
-## IR Blaster Setup
+## AC Control ESP Setup
 
 1. Open `firmware/neoclima-ir-blaster/neoclima-ir-blaster.ino`.
 2. Set WiFi credentials locally before flashing.
@@ -90,10 +90,10 @@ The IR firmware in this repo has CORS headers enabled so the dashboard can call 
    - `ESPAsyncWebServer`
    - `AsyncTCP`
 4. Flash the second ESP32.
-5. Open the serial monitor and copy the printed `IR Blaster IP`.
-6. Paste that address into dashboard `Settings` -> `IR Blaster URL`.
+5. Open the serial monitor and copy the printed `AC Control ESP IP`.
+6. Paste that address into the dashboard `AC ESP URL` field and press `Connect`.
 
-If the dashboard is loaded from GitHub Pages over HTTPS, direct commands to a local `http://` ESP32 can be blocked by the browser. For direct HTTP control, open `index.html` locally or host the dashboard over HTTP on the same network. For public HTTPS control, put the IR blaster behind an HTTPS endpoint or add an MQTT command bridge.
+If the dashboard is loaded from GitHub Pages over HTTPS, direct commands to a local `http://` ESP32 can be blocked by the browser. For direct HTTP control, open `index.html` locally or host the dashboard over HTTP on the same network. For public HTTPS control, put the AC Control ESP behind an HTTPS endpoint or add an MQTT command bridge.
 
 ## GitHub Pages
 

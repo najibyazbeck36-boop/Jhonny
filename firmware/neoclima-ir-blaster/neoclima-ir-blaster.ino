@@ -92,7 +92,7 @@ String htmlPage() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NEOCLIMA AC Controller</title>
+  <title>AC Control</title>
   <style>
     body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #111827; color: white; text-align: center; }
     main { max-width: 420px; margin: auto; background: #1f2937; padding: 24px; border-radius: 12px; }
@@ -107,7 +107,7 @@ String htmlPage() {
 </head>
 <body>
   <main>
-    <h1>NEOCLIMA AC Controller</h1>
+    <h1>AC Control</h1>
     <h2><span id="temp">24</span> deg C</h2>
     <p>
       Power: <span id="power">OFF</span><br>
@@ -177,7 +177,7 @@ void connectWiFi() {
 
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("WiFi connected");
-    Serial.print("IR Blaster IP: ");
+    Serial.print("AC Control ESP IP: ");
     Serial.println(WiFi.localIP());
   } else {
     Serial.println("WiFi failed");
@@ -304,7 +304,7 @@ void setup() {
   setupRoutes();
   server.begin();
 
-  Serial.println("IR blaster web server started");
+  Serial.println("AC Control web server started");
 }
 
 void loop() {
