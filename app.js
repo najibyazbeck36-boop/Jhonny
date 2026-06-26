@@ -11,8 +11,7 @@ const DEFAULT_SETTINGS = {
   targets: {
     air: { min: 18, max: 24 },
     humidity: { min: 85, max: 95 },
-    substrate: { min: 18, max: 24 },
-    vpd: { min: 0.2, max: 0.8 }
+    substrate: { min: 18, max: 24 }
   }
 };
 
@@ -26,8 +25,7 @@ const state = {
   history: {
     air: [],
     humidity: [],
-    substrate: [],
-    vpd: []
+    substrate: []
   }
 };
 
@@ -44,33 +42,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function cacheElements() {
   [
-    "sourceLabel",
-    "connectionLabel",
-    "lastUpdateLabel",
-    "roomStateLabel",
     "airValue",
     "humidityValue",
     "substrateValue",
-    "vpdValue",
     "airPill",
     "humidityPill",
     "substratePill",
-    "vpdPill",
     "airTarget",
     "humidityTarget",
     "substrateTarget",
-    "vpdTarget",
-    "roomBadge",
-    "roomMap",
-    "mistLayer",
-    "airNode",
-    "ptNode",
-    "deviceIp",
-    "sht20State",
-    "pt100State",
-    "wifiRssi",
-    "mqttState",
-    "uptime",
     "settingsModal",
     "settingsForm",
     "settingsButton",
@@ -95,8 +75,7 @@ function cacheElements() {
   els.sparklines = {
     air: document.getElementById("airSparkline"),
     humidity: document.getElementById("humiditySparkline"),
-    substrate: document.getElementById("substrateSparkline"),
-    vpd: document.getElementById("vpdSparkline")
+    substrate: document.getElementById("substrateSparkline")
   };
 }
 
@@ -142,8 +121,7 @@ function mergeSettings(base, incoming) {
   merged.targets = {
     air: { ...base.targets.air, ...(incoming.targets?.air || {}) },
     humidity: { ...base.targets.humidity, ...(incoming.targets?.humidity || {}) },
-    substrate: { ...base.targets.substrate, ...(incoming.targets?.substrate || {}) },
-    vpd: { ...base.targets.vpd, ...(incoming.targets?.vpd || {}) }
+    substrate: { ...base.targets.substrate, ...(incoming.targets?.substrate || {}) }
   };
   return merged;
 }
@@ -349,7 +327,6 @@ function applyPayload(payload) {
   pushHistory("air", reading.airTemp);
   pushHistory("humidity", reading.humidity);
   pushHistory("substrate", reading.substrateTemp);
-  pushHistory("vpd", reading.vpd);
 
   renderReading(reading);
   drawAllSparklines();
@@ -378,7 +355,6 @@ function normalizePayload(payload) {
     airTemp,
     humidity,
     substrateTemp,
-    vpd: computeVpd(airTemp, humidity),
     sht20Online: boolOrDefault(payload.sht20_online, isFiniteNumber(airTemp) || isFiniteNumber(humidity)),
     pt100Online: boolOrDefault(payload.pt100_online, isFiniteNumber(substrateTemp)),
     mqttConnected: boolOrDefault(payload.mqtt_connected, state.settings.source === "mqtt" ? state.connected : null),
@@ -393,23 +369,7 @@ function renderReading(reading) {
   setMetric("air", reading.airTemp, 1, state.settings.targets.air);
   setMetric("humidity", reading.humidity, 1, state.settings.targets.humidity);
   setMetric("substrate", reading.substrateTemp, 1, state.settings.targets.substrate);
-  setMetric("vpd", reading.vpd, 2, state.settings.targets.vpd);
 
-  setDeviceState(els.sht20State, reading.sht20Online);
-  setDeviceState(els.pt100State, reading.pt100Online);
-  setDeviceState(els.mqttState, reading.mqttConnected);
-
-  els.airNode.classList.toggle("offline", !reading.sht20Online);
-  els.ptNode.classList.toggle("offline", !reading.pt100Online);
-  els.deviceIp.textContent = reading.ip || "--";
-  els.wifiRssi.textContent = isFiniteNumber(reading.wifiRssi) ? `${Math.round(reading.wifiRssi)} dBm` : "--";
-  els.uptime.textContent = isFiniteNumber(reading.uptimeMs) ? formatUptime(reading.uptimeMs) : "--";
-
-  const humidityLevel = clamp(reading.humidity || 0, 0, 100) / 100;
-  els.mistLayer.style.opacity = String(0.22 + humidityLevel * 0.62);
-  els.mistLayer.style.transform = `scaleY(${0.35 + humidityLevel * 0.85})`;
-
-  updateRoomState();
   updateSystemLabels();
 }
 
@@ -423,46 +383,6 @@ function setMetric(name, value, decimals, target) {
   pill.className = `pill ${band.tone}`;
 }
 
-function setDeviceState(element, online) {
-  if (online === null || online === undefined) {
-    element.textContent = "--";
-    element.className = "";
-    return;
-  }
-
-  element.textContent = online ? "Online" : "Offline";
-  element.className = online ? "ok" : "bad";
-}
-
-function updateRoomState() {
-  const reading = state.lastReading;
-  if (!reading) {
-    setRoomBadge("--", "");
-    return;
-  }
-
-  const bands = [
-    getBand(reading.airTemp, state.settings.targets.air),
-    getBand(reading.humidity, state.settings.targets.humidity),
-    getBand(reading.substrateTemp, state.settings.targets.substrate),
-    getBand(reading.vpd, state.settings.targets.vpd)
-  ];
-
-  if (bands.some((band) => band.tone === "bad")) {
-    setRoomBadge("Review", "bad");
-  } else if (bands.some((band) => band.tone === "warn")) {
-    setRoomBadge("Watch", "warn");
-  } else {
-    setRoomBadge("Stable", "ok");
-  }
-}
-
-function setRoomBadge(text, tone) {
-  els.roomBadge.textContent = text;
-  els.roomBadge.className = `room-badge ${tone}`;
-  els.roomStateLabel.textContent = text;
-}
-
 function updateSystemLabels() {
   const sourceNames = {
     demo: "Demo",
@@ -470,18 +390,8 @@ function updateSystemLabels() {
     api: "ESP32 API"
   };
 
-  els.sourceLabel.textContent = sourceNames[state.settings.source] || state.settings.source;
-  els.connectionLabel.textContent = state.connectionText;
-
-  if (state.lastReading?.receivedAt) {
-    els.lastUpdateLabel.textContent = state.lastReading.receivedAt.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit"
-    });
-  } else {
-    els.lastUpdateLabel.textContent = "--";
-  }
+  const source = sourceNames[state.settings.source] || state.settings.source;
+  els.connectButton.title = `${source}: ${state.connectionText}`;
 }
 
 function updateTargetLabels() {
@@ -489,7 +399,6 @@ function updateTargetLabels() {
   els.airTarget.textContent = `Target ${targets.air.min}-${targets.air.max} deg C`;
   els.humidityTarget.textContent = `Target ${targets.humidity.min}-${targets.humidity.max}%`;
   els.substrateTarget.textContent = `Target ${targets.substrate.min}-${targets.substrate.max} deg C`;
-  els.vpdTarget.textContent = `Target ${targets.vpd.min.toFixed(2)}-${targets.vpd.max.toFixed(2)} kPa`;
 }
 
 function getBand(value, target) {
@@ -524,7 +433,6 @@ function drawAllSparklines() {
   drawSparkline("air", "#2f7068", state.settings.targets.air);
   drawSparkline("humidity", "#365f8d", state.settings.targets.humidity);
   drawSparkline("substrate", "#bf7b22", state.settings.targets.substrate);
-  drawSparkline("vpd", "#b3453f", state.settings.targets.vpd);
 }
 
 function drawSparkline(key, color, target) {
@@ -613,15 +521,6 @@ function jitter(amount) {
   return (Math.random() - 0.5) * amount * 2;
 }
 
-function computeVpd(tempC, humidity) {
-  if (!isFiniteNumber(tempC) || !isFiniteNumber(humidity)) {
-    return null;
-  }
-
-  const saturated = 0.6108 * Math.exp((17.27 * tempC) / (tempC + 237.3));
-  return saturated * (1 - clamp(humidity, 0, 100) / 100);
-}
-
 function firstNumber(...values) {
   for (const value of values) {
     const number = Number(value);
@@ -653,10 +552,6 @@ function isFiniteNumber(value) {
   return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 }
 
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
 function readableError(error) {
   if (error?.name === "AbortError") {
     return "Timeout";
@@ -664,23 +559,6 @@ function readableError(error) {
 
   const message = error?.message || String(error);
   return message.length > 24 ? `${message.slice(0, 24)}...` : message;
-}
-
-function formatUptime(ms) {
-  const totalSeconds = Math.floor(ms / 1000);
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-
-  if (days > 0) {
-    return `${days}d ${hours}h`;
-  }
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-
-  return `${minutes}m`;
 }
 
 function debounce(callback, wait) {

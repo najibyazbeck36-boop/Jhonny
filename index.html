@@ -22,25 +22,6 @@
     </header>
 
     <main>
-      <section class="system-strip" aria-label="System status">
-        <div class="system-item">
-          <span>Source</span>
-          <strong id="sourceLabel">Demo</strong>
-        </div>
-        <div class="system-item">
-          <span>Status</span>
-          <strong id="connectionLabel">Starting</strong>
-        </div>
-        <div class="system-item">
-          <span>Last update</span>
-          <strong id="lastUpdateLabel">--</strong>
-        </div>
-        <div class="system-item">
-          <span>Room state</span>
-          <strong id="roomStateLabel">--</strong>
-        </div>
-      </section>
-
       <section class="metric-grid" aria-label="Climate metrics">
         <article class="metric-card" id="airCard">
           <div class="metric-head">
@@ -70,7 +51,7 @@
 
         <article class="metric-card" id="substrateCard">
           <div class="metric-head">
-            <span>PT100 temperature</span>
+            <span>Compost temperature</span>
             <span class="pill" id="substratePill">--</span>
           </div>
           <div class="metric-value">
@@ -78,74 +59,8 @@
             <span>deg C</span>
           </div>
           <div class="target-line" id="substrateTarget">Target 18-24 deg C</div>
-          <canvas class="sparkline" id="substrateSparkline" aria-label="PT100 temperature history"></canvas>
+          <canvas class="sparkline" id="substrateSparkline" aria-label="Compost temperature history"></canvas>
         </article>
-
-        <article class="metric-card" id="vpdCard">
-          <div class="metric-head">
-            <span>VPD</span>
-            <span class="pill" id="vpdPill">--</span>
-          </div>
-          <div class="metric-value">
-            <strong id="vpdValue">--</strong>
-            <span>kPa</span>
-          </div>
-          <div class="target-line" id="vpdTarget">Target 0.20-0.80 kPa</div>
-          <canvas class="sparkline" id="vpdSparkline" aria-label="VPD history"></canvas>
-        </article>
-      </section>
-
-      <section class="workbench">
-        <div class="room-panel">
-          <div class="panel-head">
-            <h2>Grow Room</h2>
-            <span id="roomBadge" class="room-badge">--</span>
-          </div>
-          <div class="room-map" id="roomMap">
-            <div class="room-ceiling">
-              <span id="airNode" class="sensor-node">SHT20</span>
-              <span class="fan-ring"></span>
-            </div>
-            <div class="mist-layer" id="mistLayer"></div>
-            <div class="bed-stack">
-              <span></span>
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
-            <span id="ptNode" class="sensor-node probe">PT100</span>
-            <div class="floor-line"></div>
-          </div>
-        </div>
-
-        <div class="device-panel">
-          <div class="panel-head">
-            <h2>Devices</h2>
-            <span id="deviceIp">--</span>
-          </div>
-          <div class="device-list">
-            <div class="device-row">
-              <span>SHT20</span>
-              <strong id="sht20State">--</strong>
-            </div>
-            <div class="device-row">
-              <span>PT100</span>
-              <strong id="pt100State">--</strong>
-            </div>
-            <div class="device-row">
-              <span>WiFi RSSI</span>
-              <strong id="wifiRssi">--</strong>
-            </div>
-            <div class="device-row">
-              <span>MQTT</span>
-              <strong id="mqttState">--</strong>
-            </div>
-            <div class="device-row">
-              <span>Uptime</span>
-              <strong id="uptime">--</strong>
-            </div>
-          </div>
-        </div>
       </section>
     </main>
   </div>
@@ -214,11 +129,11 @@
           <input id="humidityMaxInput" type="number" step="0.1">
         </label>
         <label>
-          <span>PT100 min</span>
+          <span>Compost min</span>
           <input id="substrateMinInput" type="number" step="0.1">
         </label>
         <label>
-          <span>PT100 max</span>
+          <span>Compost max</span>
           <input id="substrateMaxInput" type="number" step="0.1">
         </label>
       </div>

@@ -299,7 +299,7 @@ String webPage() {
         <div class="status" id="shtStatus2">--</div>
       </div>
       <div class="card">
-        <div class="label">PT100 Temperature</div>
+        <div class="label">Compost Temperature</div>
         <div class="value" id="ptTemp">--</div>
         <div class="status" id="ptStatus">--</div>
       </div>

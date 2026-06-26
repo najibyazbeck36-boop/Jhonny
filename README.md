@@ -2,11 +2,16 @@
 
 Static GitHub Pages dashboard for an ESP32 RS485/Modbus climate node in a mushroom farm.
 
+The dashboard shows only three cards:
+
+- Air temperature from SHT20
+- Air humidity from SHT20
+- Compost temperature from PT100
+
 The ESP32 firmware reads:
 
 - SHT20 air temperature and humidity over Modbus RTU
-- PT100 temperature over Modbus RTU
-- WiFi and device health
+- PT100 compost temperature over Modbus RTU
 
 It publishes JSON to MQTT and exposes the same JSON at `/api`.
 
