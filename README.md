@@ -117,6 +117,11 @@ Use `MQTT WS` when the dashboard is hosted on GitHub Pages.
 
 Use `ESP32 API` only when the browser can reach the ESP32 over local HTTP. GitHub Pages is HTTPS, so many browsers block direct `http://esp32-ip/api` requests from a GitHub Pages page.
 
+The `Sensors calibration` tab stores a correction offset for each dashboard reading. The
+offset is added to the raw sensor value before the value, range status, and history graph
+are displayed. For example, set the PT100 offset to `+2.0` when it reads 16 C and the
+reference temperature is 18 C. Set an offset back to `0` to remove that calibration.
+
 ## HiveMQ Cloud Setup
 
 Use HiveMQ Cloud for live data on the web:

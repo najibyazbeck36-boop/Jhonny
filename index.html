@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mushroom Farm Climate Monitor</title>
-  <link rel="stylesheet" href="styles.css?v=20260626-mqtt-ac">
+  <link rel="stylesheet" href="styles.css?v=20260701-sensor-calibration">
   <script defer src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <script defer src="app.js?v=20260626-mqtt-ac"></script>
+  <script defer src="app.js?v=20260701-sensor-calibration"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -164,83 +164,139 @@
         <button type="button" class="icon-button" id="closeSettingsButton" aria-label="Close settings">x</button>
       </div>
 
-      <fieldset class="segmented">
-        <legend>Data source</legend>
-        <label>
-          <input type="radio" name="source" value="demo">
-          <span>Demo</span>
-        </label>
-        <label>
-          <input type="radio" name="source" value="mqtt">
-          <span>MQTT WS</span>
-        </label>
-        <label>
-          <input type="radio" name="source" value="api">
-          <span>ESP32 API</span>
-        </label>
-      </fieldset>
-
-      <div class="form-grid">
-        <label>
-          <span>MQTT WebSocket URL</span>
-          <input id="mqttUrlInput" type="url" placeholder="wss://broker.example.com:8884/mqtt">
-        </label>
-        <label>
-          <span>MQTT topic</span>
-          <input id="mqttTopicInput" type="text" placeholder="centralcommand/room1/sensors">
-        </label>
-        <label>
-          <span>MQTT username</span>
-          <input id="mqttUserInput" type="text" autocomplete="username">
-        </label>
-        <label>
-          <span>MQTT password</span>
-          <input id="mqttPasswordInput" type="password" autocomplete="current-password">
-        </label>
-        <label class="wide">
-          <span>ESP32 API URL</span>
-          <input id="apiUrlInput" type="url" placeholder="http://192.168.1.50/api">
-        </label>
-        <label class="wide">
-          <span>AC ESP URL local HTTP</span>
-          <input id="irUrlInput" type="url" placeholder="http://192.168.1.60">
-        </label>
-        <label>
-          <span>AC MQTT command topic</span>
-          <input id="irCommandTopicInput" type="text" placeholder="centralcommand/room1/ac/cmd">
-        </label>
-        <label>
-          <span>AC MQTT status topic</span>
-          <input id="irStatusTopicInput" type="text" placeholder="centralcommand/room1/ac/status">
-        </label>
+      <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+        <button class="settings-tab" id="generalSettingsTab" type="button" role="tab"
+          aria-selected="true" aria-controls="generalSettingsPanel" data-settings-tab="general">
+          General
+        </button>
+        <button class="settings-tab" id="calibrationSettingsTab" type="button" role="tab"
+          aria-selected="false" aria-controls="calibrationSettingsPanel" data-settings-tab="calibration"
+          tabindex="-1">
+          Sensors calibration
+        </button>
       </div>
 
-      <div class="range-grid">
-        <label>
-          <span>Air min</span>
-          <input id="airMinInput" type="number" step="0.1">
-        </label>
-        <label>
-          <span>Air max</span>
-          <input id="airMaxInput" type="number" step="0.1">
-        </label>
-        <label>
-          <span>Humidity min</span>
-          <input id="humidityMinInput" type="number" step="0.1">
-        </label>
-        <label>
-          <span>Humidity max</span>
-          <input id="humidityMaxInput" type="number" step="0.1">
-        </label>
-        <label>
-          <span>Compost min</span>
-          <input id="substrateMinInput" type="number" step="0.1">
-        </label>
-        <label>
-          <span>Compost max</span>
-          <input id="substrateMaxInput" type="number" step="0.1">
-        </label>
-      </div>
+      <section id="generalSettingsPanel" role="tabpanel" aria-labelledby="generalSettingsTab"
+        data-settings-panel="general">
+        <fieldset class="segmented">
+          <legend>Data source</legend>
+          <label>
+            <input type="radio" name="source" value="demo">
+            <span>Demo</span>
+          </label>
+          <label>
+            <input type="radio" name="source" value="mqtt">
+            <span>MQTT WS</span>
+          </label>
+          <label>
+            <input type="radio" name="source" value="api">
+            <span>ESP32 API</span>
+          </label>
+        </fieldset>
+
+        <div class="form-grid">
+          <label>
+            <span>MQTT WebSocket URL</span>
+            <input id="mqttUrlInput" type="url" placeholder="wss://broker.example.com:8884/mqtt">
+          </label>
+          <label>
+            <span>MQTT topic</span>
+            <input id="mqttTopicInput" type="text" placeholder="centralcommand/room1/sensors">
+          </label>
+          <label>
+            <span>MQTT username</span>
+            <input id="mqttUserInput" type="text" autocomplete="username">
+          </label>
+          <label>
+            <span>MQTT password</span>
+            <input id="mqttPasswordInput" type="password" autocomplete="current-password">
+          </label>
+          <label class="wide">
+            <span>ESP32 API URL</span>
+            <input id="apiUrlInput" type="url" placeholder="http://192.168.1.50/api">
+          </label>
+          <label class="wide">
+            <span>AC ESP URL local HTTP</span>
+            <input id="irUrlInput" type="url" placeholder="http://192.168.1.60">
+          </label>
+          <label>
+            <span>AC MQTT command topic</span>
+            <input id="irCommandTopicInput" type="text" placeholder="centralcommand/room1/ac/cmd">
+          </label>
+          <label>
+            <span>AC MQTT status topic</span>
+            <input id="irStatusTopicInput" type="text" placeholder="centralcommand/room1/ac/status">
+          </label>
+        </div>
+
+        <div class="range-grid">
+          <label>
+            <span>Air min</span>
+            <input id="airMinInput" type="number" step="0.1">
+          </label>
+          <label>
+            <span>Air max</span>
+            <input id="airMaxInput" type="number" step="0.1">
+          </label>
+          <label>
+            <span>Humidity min</span>
+            <input id="humidityMinInput" type="number" step="0.1">
+          </label>
+          <label>
+            <span>Humidity max</span>
+            <input id="humidityMaxInput" type="number" step="0.1">
+          </label>
+          <label>
+            <span>Compost min</span>
+            <input id="substrateMinInput" type="number" step="0.1">
+          </label>
+          <label>
+            <span>Compost max</span>
+            <input id="substrateMaxInput" type="number" step="0.1">
+          </label>
+        </div>
+      </section>
+
+      <section id="calibrationSettingsPanel" role="tabpanel" aria-labelledby="calibrationSettingsTab"
+        data-settings-panel="calibration" hidden>
+        <p class="calibration-help" id="calibrationHelp">
+          Enter the correction to add to each raw sensor reading. Example: a PT100 reading of 16 C
+          with an offset of +2.0 C will display as 18.0 C.
+        </p>
+
+        <div class="calibration-grid">
+          <label class="calibration-card">
+            <span class="calibration-sensor">SHT20 air temperature</span>
+            <span>Correction offset</span>
+            <span class="input-with-unit">
+              <input id="airCalibrationInput" type="text" inputmode="decimal" value="0"
+                pattern="[+-]?[0-9]*[.]?[0-9]+" placeholder="+0.0"
+                title="Enter a signed number such as +2.0 or -1.5" aria-describedby="calibrationHelp">
+              <span>deg C</span>
+            </span>
+          </label>
+          <label class="calibration-card">
+            <span class="calibration-sensor">SHT20 humidity</span>
+            <span>Correction offset</span>
+            <span class="input-with-unit">
+              <input id="humidityCalibrationInput" type="text" inputmode="decimal" value="0"
+                pattern="[+-]?[0-9]*[.]?[0-9]+" placeholder="+0.0"
+                title="Enter a signed number such as +2.0 or -1.5" aria-describedby="calibrationHelp">
+              <span>%</span>
+            </span>
+          </label>
+          <label class="calibration-card">
+            <span class="calibration-sensor">PT100 compost temperature</span>
+            <span>Correction offset</span>
+            <span class="input-with-unit">
+              <input id="substrateCalibrationInput" type="text" inputmode="decimal" value="0"
+                pattern="[+-]?[0-9]*[.]?[0-9]+" placeholder="+0.0"
+                title="Enter a signed number such as +2.0 or -1.5" aria-describedby="calibrationHelp">
+              <span>deg C</span>
+            </span>
+          </label>
+        </div>
+      </section>
 
       <div class="modal-actions">
         <button type="button" class="button secondary" id="resetSettingsButton">Reset</button>

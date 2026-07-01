@@ -16,6 +16,11 @@ const DEFAULT_SETTINGS = {
     air: { min: 18, max: 24 },
     humidity: { min: 85, max: 95 },
     substrate: { min: 18, max: 24 }
+  },
+  calibration: {
+    air: 0,
+    humidity: 0,
+    substrate: 0
   }
 };
 
@@ -87,6 +92,9 @@ function cacheElements() {
     "humidityMaxInput",
     "substrateMinInput",
     "substrateMaxInput",
+    "airCalibrationInput",
+    "humidityCalibrationInput",
+    "substrateCalibrationInput",
     "irBadge",
     "irRefreshButton",
     "acTemp",
@@ -105,6 +113,8 @@ function cacheElements() {
   };
 
   els.irCommandButtons = Array.from(document.querySelectorAll("[data-ir-cmd]"));
+  els.settingsTabs = Array.from(document.querySelectorAll("[data-settings-tab]"));
+  els.settingsPanels = Array.from(document.querySelectorAll("[data-settings-panel]"));
 }
 
 function bindEvents() {
@@ -115,12 +125,17 @@ function bindEvents() {
   els.irCommandButtons.forEach((button) => {
     button.addEventListener("click", () => sendIrCommand(button.dataset.irCmd));
   });
+  els.settingsTabs.forEach((tab) => {
+    tab.addEventListener("click", () => selectSettingsTab(tab.dataset.settingsTab));
+    tab.addEventListener("keydown", handleSettingsTabKeydown);
+  });
 
   els.resetSettingsButton.addEventListener("click", () => {
     state.settings = structuredClone(DEFAULT_SETTINGS);
     saveSettings();
     hydrateSettingsForm();
     updateTargetLabels();
+    startDataSource();
     startIrPolling();
   });
 
@@ -158,6 +173,10 @@ function mergeSettings(base, incoming) {
     humidity: { ...base.targets.humidity, ...(incoming.targets?.humidity || {}) },
     substrate: { ...base.targets.substrate, ...(incoming.targets?.substrate || {}) }
   };
+  merged.calibration = {
+    ...base.calibration,
+    ...(incoming.calibration || {})
+  };
   return merged;
 }
 
@@ -168,11 +187,39 @@ function saveSettings() {
 function openSettings() {
   hydrateSettingsForm();
   els.settingsModal.hidden = false;
-  els.mqttUrlInput.focus();
+  const activePanel = els.settingsPanels.find((panel) => !panel.hidden);
+  activePanel?.querySelector("input")?.focus();
 }
 
 function closeSettings() {
   els.settingsModal.hidden = true;
+}
+
+function selectSettingsTab(tabName, moveFocus = false) {
+  els.settingsTabs.forEach((tab) => {
+    const isSelected = tab.dataset.settingsTab === tabName;
+    tab.setAttribute("aria-selected", String(isSelected));
+    tab.tabIndex = isSelected ? 0 : -1;
+    if (isSelected && moveFocus) {
+      tab.focus();
+    }
+  });
+
+  els.settingsPanels.forEach((panel) => {
+    panel.hidden = panel.dataset.settingsPanel !== tabName;
+  });
+}
+
+function handleSettingsTabKeydown(event) {
+  if (!["ArrowLeft", "ArrowRight"].includes(event.key)) {
+    return;
+  }
+
+  event.preventDefault();
+  const currentIndex = els.settingsTabs.indexOf(event.currentTarget);
+  const direction = event.key === "ArrowRight" ? 1 : -1;
+  const nextIndex = (currentIndex + direction + els.settingsTabs.length) % els.settingsTabs.length;
+  selectSettingsTab(els.settingsTabs[nextIndex].dataset.settingsTab, true);
 }
 
 function hydrateSettingsForm() {
@@ -196,6 +243,9 @@ function hydrateSettingsForm() {
   els.humidityMaxInput.value = settings.targets.humidity.max;
   els.substrateMinInput.value = settings.targets.substrate.min;
   els.substrateMaxInput.value = settings.targets.substrate.max;
+  els.airCalibrationInput.value = settings.calibration.air;
+  els.humidityCalibrationInput.value = settings.calibration.humidity;
+  els.substrateCalibrationInput.value = settings.calibration.substrate;
 }
 
 function readSettingsForm() {
@@ -217,6 +267,18 @@ function readSettingsForm() {
   settings.targets.humidity.max = numberOrDefault(els.humidityMaxInput.value, DEFAULT_SETTINGS.targets.humidity.max);
   settings.targets.substrate.min = numberOrDefault(els.substrateMinInput.value, DEFAULT_SETTINGS.targets.substrate.min);
   settings.targets.substrate.max = numberOrDefault(els.substrateMaxInput.value, DEFAULT_SETTINGS.targets.substrate.max);
+  settings.calibration.air = numberOrDefault(
+    els.airCalibrationInput.value,
+    DEFAULT_SETTINGS.calibration.air
+  );
+  settings.calibration.humidity = numberOrDefault(
+    els.humidityCalibrationInput.value,
+    DEFAULT_SETTINGS.calibration.humidity
+  );
+  settings.calibration.substrate = numberOrDefault(
+    els.substrateCalibrationInput.value,
+    DEFAULT_SETTINGS.calibration.substrate
+  );
   return settings;
 }
 
@@ -853,36 +915,54 @@ function checkEsp32Freshness() {
 }
 
 function normalizePayload(payload) {
-  const airTemp = firstNumber(
+  const rawAirTemp = firstNumber(
     payload.sht20_temperature,
     payload.air_temperature,
     payload.airTemp,
     payload.temperature
   );
-  const humidity = firstNumber(
+  const rawHumidity = firstNumber(
     payload.sht20_humidity,
     payload.humidity,
     payload.relative_humidity
   );
-  const substrateTemp = firstNumber(
+  const rawSubstrateTemp = firstNumber(
     payload.pt100_temperature,
     payload.substrate_temperature,
     payload.substrateTemp,
     payload.probe_temperature
   );
+  const airTemp = applyCalibration(rawAirTemp, "air");
+  const humidity = applyCalibration(rawHumidity, "humidity");
+  const substrateTemp = applyCalibration(rawSubstrateTemp, "substrate");
 
   return {
     airTemp,
     humidity,
     substrateTemp,
-    sht20Online: boolOrDefault(payload.sht20_online, isFiniteNumber(airTemp) || isFiniteNumber(humidity)),
-    pt100Online: boolOrDefault(payload.pt100_online, isFiniteNumber(substrateTemp)),
+    rawAirTemp,
+    rawHumidity,
+    rawSubstrateTemp,
+    sht20Online: boolOrDefault(payload.sht20_online, isFiniteNumber(rawAirTemp) || isFiniteNumber(rawHumidity)),
+    pt100Online: boolOrDefault(payload.pt100_online, isFiniteNumber(rawSubstrateTemp)),
     mqttConnected: boolOrDefault(payload.mqtt_connected, state.settings.source === "mqtt" ? state.connected : null),
     wifiRssi: firstNumber(payload.wifi_rssi, payload.rssi),
     ip: payload.ip || payload.device_ip || "--",
     uptimeMs: firstNumber(payload.uptime_ms, payload.uptime),
     raw: payload
   };
+}
+
+function applyCalibration(value, channel) {
+  if (!isFiniteNumber(value)) {
+    return null;
+  }
+
+  const offset = numberOrDefault(
+    state.settings.calibration?.[channel],
+    DEFAULT_SETTINGS.calibration[channel]
+  );
+  return Number(value) + offset;
 }
 
 function renderReading(reading) {
