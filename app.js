@@ -1,6 +1,7 @@
 const STORAGE_KEY = "mushroom-climate-dashboard-settings";
 const MAX_HISTORY = 80;
 const ESP32_STALE_MS = 15000;
+const CALIBRATION_CHANNELS = ["air", "humidity", "substrate"];
 
 const DEFAULT_SETTINGS = {
   source: "demo",
@@ -21,7 +22,9 @@ const DEFAULT_SETTINGS = {
     air: 0,
     humidity: 0,
     substrate: 0
-  }
+  },
+  calibrationUpdatedAt: "",
+  calibrationSyncPending: false
 };
 
 const state = {
@@ -38,6 +41,7 @@ const state = {
   connectionText: "Starting",
   lastContactAt: null,
   lastReading: null,
+  pendingCalibrationPublish: null,
   history: {
     air: [],
     humidity: [],
@@ -49,6 +53,7 @@ const els = {};
 
 document.addEventListener("DOMContentLoaded", () => {
   cacheElements();
+  restorePendingCalibrationSync();
   bindEvents();
   hydrateSettingsForm();
   updateTargetLabels();
@@ -95,6 +100,8 @@ function cacheElements() {
     "airCalibrationInput",
     "humidityCalibrationInput",
     "substrateCalibrationInput",
+    "calibrationSyncStatus",
+    "calibrationSyncTopic",
     "irBadge",
     "irRefreshButton",
     "acTemp",
@@ -131,8 +138,20 @@ function bindEvents() {
   });
 
   els.resetSettingsButton.addEventListener("click", () => {
+    const activeTab = els.settingsTabs.find((tab) => tab.getAttribute("aria-selected") === "true");
+    if (activeTab?.dataset.settingsTab === "calibration") {
+      els.airCalibrationInput.value = "0";
+      els.humidityCalibrationInput.value = "0";
+      els.substrateCalibrationInput.value = "0";
+      els.settingsForm.requestSubmit();
+      return;
+    }
+
+    const previousCalibration = state.settings.calibration;
     state.settings = structuredClone(DEFAULT_SETTINGS);
+    state.pendingCalibrationPublish = null;
     saveSettings();
+    refreshCalibratedData(previousCalibration);
     hydrateSettingsForm();
     updateTargetLabels();
     startDataSource();
@@ -147,12 +166,42 @@ function bindEvents() {
 
   els.settingsForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    state.settings = readSettingsForm();
+    const previousSettings = state.settings;
+    const nextSettings = readSettingsForm();
+    const activeTab = els.settingsTabs.find((tab) => tab.getAttribute("aria-selected") === "true");
+    const calibrationChanged = !calibrationsMatch(
+      previousSettings.calibration,
+      nextSettings.calibration
+    );
+    const shouldSyncCalibration = calibrationChanged || activeTab?.dataset.settingsTab === "calibration";
+    const restartDataSource = dataSourceSettingsChanged(previousSettings, nextSettings);
+    const restartIr = irSettingsChanged(previousSettings, nextSettings);
+
+    state.settings = nextSettings;
+    if (calibrationChanged) {
+      refreshCalibratedData(previousSettings.calibration);
+    }
+    if (shouldSyncCalibration) {
+      queueCalibrationSync();
+    }
+
     saveSettings();
     updateTargetLabels();
+    if (state.lastReading) {
+      renderReading(state.lastReading);
+      drawAllSparklines();
+    }
     closeSettings();
-    startDataSource();
-    startIrPolling();
+
+    if (restartDataSource) {
+      startDataSource();
+    } else {
+      publishQueuedCalibration().catch(() => {});
+    }
+
+    if (restartIr) {
+      startIrPolling();
+    }
   });
 }
 
@@ -246,6 +295,8 @@ function hydrateSettingsForm() {
   els.airCalibrationInput.value = settings.calibration.air;
   els.humidityCalibrationInput.value = settings.calibration.humidity;
   els.substrateCalibrationInput.value = settings.calibration.substrate;
+  els.calibrationSyncTopic.textContent = calibrationTopic(settings.mqttTopic);
+  updateCalibrationSyncStatus();
 }
 
 function readSettingsForm() {
@@ -280,6 +331,38 @@ function readSettingsForm() {
     DEFAULT_SETTINGS.calibration.substrate
   );
   return settings;
+}
+
+function calibrationsMatch(first, second) {
+  return CALIBRATION_CHANNELS.every(
+    (channel) => Number(first?.[channel]) === Number(second?.[channel])
+  );
+}
+
+function settingsChanged(previous, next, keys) {
+  return keys.some((key) => previous[key] !== next[key]);
+}
+
+function dataSourceSettingsChanged(previous, next) {
+  return settingsChanged(previous, next, [
+    "source",
+    "mqttUrl",
+    "mqttTopic",
+    "mqttUser",
+    "mqttPassword",
+    "apiUrl"
+  ]);
+}
+
+function irSettingsChanged(previous, next) {
+  return settingsChanged(previous, next, [
+    "mqttUrl",
+    "mqttUser",
+    "mqttPassword",
+    "irUrl",
+    "irCommandTopic",
+    "irStatusTopic"
+  ]);
 }
 
 function startDataSource() {
@@ -806,11 +889,24 @@ function startMqtt() {
     state.connected = false;
     state.connectionText = "Waiting for ESP32 data";
     state.lastContactAt = Date.now();
-    mqttTopics().forEach((topic) => state.mqttClient.subscribe(topic));
+    state.mqttClient.subscribe(mqttTopics(), (error) => {
+      if (error) {
+        setCalibrationSyncStatus("Subscription failed", "bad");
+        return;
+      }
+
+      updateCalibrationSyncStatus();
+      publishQueuedCalibration().catch(() => {});
+    });
     updateSystemLabels();
   });
 
   state.mqttClient.on("message", (topic, message) => {
+    if (topic === calibrationTopic()) {
+      handleCalibrationMessage(message.toString());
+      return;
+    }
+
     if (topic === mqttStatusTopic()) {
       handleMqttStatus(message.toString());
       return;
@@ -835,18 +931,21 @@ function startMqtt() {
   state.mqttClient.on("reconnect", () => {
     state.connected = false;
     state.connectionText = "Reconnecting";
+    updateCalibrationSyncStatus();
     updateSystemLabels();
   });
 
   state.mqttClient.on("offline", () => {
     state.connected = false;
     state.connectionText = "Offline";
+    updateCalibrationSyncStatus();
     updateSystemLabels();
   });
 
   state.mqttClient.on("error", (error) => {
     state.connected = false;
     state.connectionText = readableError(error);
+    updateCalibrationSyncStatus();
     updateSystemLabels();
   });
 
@@ -869,7 +968,9 @@ function applyPayload(payload) {
 }
 
 function mqttTopics() {
-  return Array.from(new Set([state.settings.mqttTopic, mqttStatusTopic()].filter(Boolean)));
+  return Array.from(
+    new Set([state.settings.mqttTopic, mqttStatusTopic(), calibrationTopic()].filter(Boolean))
+  );
 }
 
 function mqttStatusTopic() {
@@ -878,6 +979,167 @@ function mqttStatusTopic() {
   }
 
   return state.settings.mqttTopic.replace(/\/sensors$/, "/status");
+}
+
+function calibrationTopic(mqttTopic = state.settings.mqttTopic) {
+  const topic = (mqttTopic || DEFAULT_SETTINGS.mqttTopic).replace(/\/+$/, "");
+  if (topic.endsWith("/sensors")) {
+    return topic.replace(/\/sensors$/, "/calibration");
+  }
+
+  return `${topic}/calibration`;
+}
+
+function queueCalibrationSync() {
+  const updatedAt = new Date().toISOString();
+  state.settings.calibrationUpdatedAt = updatedAt;
+  state.settings.calibrationSyncPending = true;
+  state.pendingCalibrationPublish = {
+    version: 1,
+    calibration: { ...state.settings.calibration },
+    updatedAt
+  };
+  setCalibrationSyncStatus(
+    state.settings.source === "mqtt" ? "Syncing" : "Select MQTT WS to sync",
+    "warn"
+  );
+}
+
+function restorePendingCalibrationSync() {
+  if (!state.settings.calibrationSyncPending) {
+    return;
+  }
+
+  state.pendingCalibrationPublish = {
+    version: 1,
+    calibration: { ...state.settings.calibration },
+    updatedAt: state.settings.calibrationUpdatedAt || new Date().toISOString()
+  };
+}
+
+function publishQueuedCalibration() {
+  const pending = state.pendingCalibrationPublish;
+  if (!pending || state.settings.source !== "mqtt" || !state.mqttClient?.connected) {
+    updateCalibrationSyncStatus();
+    return Promise.resolve(false);
+  }
+
+  setCalibrationSyncStatus("Syncing", "warn");
+  return new Promise((resolve, reject) => {
+    state.mqttClient.publish(
+      calibrationTopic(),
+      JSON.stringify(pending),
+      { qos: 1, retain: true },
+      (error) => {
+        if (error) {
+          setCalibrationSyncStatus("Sync failed", "bad");
+          reject(error);
+          return;
+        }
+
+        if (state.pendingCalibrationPublish === pending) {
+          state.pendingCalibrationPublish = null;
+          state.settings.calibrationSyncPending = false;
+          saveSettings();
+        }
+        setCalibrationSyncStatus("Synced", "ok");
+        resolve(true);
+      }
+    );
+  });
+}
+
+function handleCalibrationMessage(message) {
+  if (state.pendingCalibrationPublish) {
+    return;
+  }
+
+  try {
+    const payload = JSON.parse(message);
+    const incoming = payload.calibration || payload;
+    if (!CALIBRATION_CHANNELS.every((channel) => isFiniteNumber(incoming[channel]))) {
+      throw new Error("Missing calibration value");
+    }
+
+    const previousCalibration = state.settings.calibration;
+    state.settings.calibration = {
+      air: Number(incoming.air),
+      humidity: Number(incoming.humidity),
+      substrate: Number(incoming.substrate)
+    };
+    state.settings.calibrationUpdatedAt = payload.updatedAt || new Date().toISOString();
+    state.settings.calibrationSyncPending = false;
+    saveSettings();
+    refreshCalibratedData(previousCalibration);
+    hydrateCalibrationInputs();
+    setCalibrationSyncStatus("Synced", "ok");
+  } catch {
+    setCalibrationSyncStatus("Invalid shared data", "bad");
+  }
+}
+
+function hydrateCalibrationInputs() {
+  els.airCalibrationInput.value = state.settings.calibration.air;
+  els.humidityCalibrationInput.value = state.settings.calibration.humidity;
+  els.substrateCalibrationInput.value = state.settings.calibration.substrate;
+}
+
+function refreshCalibratedData(previousCalibration) {
+  const readings = {
+    air: { raw: "rawAirTemp", value: "airTemp" },
+    humidity: { raw: "rawHumidity", value: "humidity" },
+    substrate: { raw: "rawSubstrateTemp", value: "substrateTemp" }
+  };
+
+  CALIBRATION_CHANNELS.forEach((channel) => {
+    const oldOffset = numberOrDefault(
+      previousCalibration?.[channel],
+      DEFAULT_SETTINGS.calibration[channel]
+    );
+    const newOffset = numberOrDefault(
+      state.settings.calibration[channel],
+      DEFAULT_SETTINGS.calibration[channel]
+    );
+    const difference = newOffset - oldOffset;
+    state.history[channel].forEach((point) => {
+      point.value += difference;
+    });
+
+    if (state.lastReading) {
+      const fields = readings[channel];
+      state.lastReading[fields.value] = applyCalibration(
+        state.lastReading[fields.raw],
+        channel
+      );
+    }
+  });
+
+  if (state.lastReading) {
+    renderReading(state.lastReading);
+    drawAllSparklines();
+  }
+}
+
+function setCalibrationSyncStatus(text, tone = "") {
+  els.calibrationSyncStatus.textContent = text;
+  els.calibrationSyncStatus.className = `sync-status ${tone}`.trim();
+}
+
+function updateCalibrationSyncStatus() {
+  if (state.settings.source !== "mqtt") {
+    setCalibrationSyncStatus("Select MQTT WS to sync", "warn");
+    return;
+  }
+
+  if (state.pendingCalibrationPublish) {
+    setCalibrationSyncStatus(
+      state.mqttClient?.connected ? "Syncing" : "Waiting to sync",
+      "warn"
+    );
+    return;
+  }
+
+  setCalibrationSyncStatus(state.mqttClient?.connected ? "Connected" : "Waiting for MQTT");
 }
 
 function handleMqttStatus(message) {

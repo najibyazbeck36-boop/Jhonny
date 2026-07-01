@@ -570,6 +570,54 @@ legend {
   line-height: 1.5;
 }
 
+.calibration-sync {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfb;
+}
+
+.calibration-sync div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.calibration-sync p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.calibration-sync code {
+  overflow-wrap: anywhere;
+  color: var(--teal);
+  font-size: 0.82rem;
+}
+
+.sync-status {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.sync-status.ok {
+  color: var(--green);
+}
+
+.sync-status.warn {
+  color: var(--amber);
+}
+
+.sync-status.bad {
+  color: var(--red);
+}
+
 .calibration-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

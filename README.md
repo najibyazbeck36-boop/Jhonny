@@ -122,6 +122,17 @@ offset is added to the raw sensor value before the value, range status, and hist
 are displayed. For example, set the PT100 offset to `+2.0` when it reads 16 C and the
 reference temperature is 18 C. Set an offset back to `0` to remove that calibration.
 
+When `MQTT WS` is selected, calibration values are synchronized globally through a retained
+MQTT message. For the default sensor topic, the shared calibration topic is:
+
+```text
+centralcommand/room1/calibration
+```
+
+Every browser or installed mobile app using the same MQTT broker account and sensor topic
+receives the latest retained offsets. MQTT connection credentials remain local to each
+device and are never included in the shared calibration message.
+
 ## HiveMQ Cloud Setup
 
 Use HiveMQ Cloud for live data on the web:

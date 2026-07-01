@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mushroom Farm Climate Monitor</title>
-  <link rel="stylesheet" href="styles.css?v=20260701-sensor-calibration">
+  <link rel="stylesheet" href="styles.css?v=20260701-global-calibration">
   <script defer src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <script defer src="app.js?v=20260701-sensor-calibration"></script>
+  <script defer src="app.js?v=20260701-global-calibration"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -263,6 +263,18 @@
           Enter the correction to add to each raw sensor reading. Example: a PT100 reading of 16 C
           with an offset of +2.0 C will display as 18.0 C.
         </p>
+
+        <div class="calibration-sync">
+          <div>
+            <strong>Global MQTT sync</strong>
+            <span class="sync-status" id="calibrationSyncStatus">Waiting for MQTT</span>
+          </div>
+          <p>
+            Offsets are shared with every browser and installed app using the same MQTT account
+            and sensor topic.
+          </p>
+          <code id="calibrationSyncTopic">centralcommand/room1/calibration</code>
+        </div>
 
         <div class="calibration-grid">
           <label class="calibration-card">
