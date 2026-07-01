@@ -4,6 +4,7 @@
 #include <PubSubClient.h>
 #include <ModbusMaster.h>
 #include <ArduinoOTA.h>
+#include <Preferences.h>
 
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -62,11 +63,62 @@ const bool MQTT_USE_TLS = MQTT_USE_TLS_VALUE;
 
 const char* MQTT_TOPIC_STATUS = "centralcommand/room1/status";
 const char* MQTT_TOPIC_DATA = "centralcommand/room1/sensors";
+const char* MQTT_TOPIC_CALIBRATION = "centralcommand/room1/calibration";
+const char* MQTT_TOPIC_HUMIDIFIER_CONFIG = "centralcommand/room1/humidifier/config";
+const char* MQTT_TOPIC_HUMIDIFIER_STATUS = "centralcommand/room1/humidifier/status";
 
 // ===================== RS485 PINS =====================
 #define RS485_TX_PIN 17
 #define RS485_RX_PIN 16
 #define RS485_DE_RE_PIN 4
+
+// ===================== 4-CHANNEL RELAY PINS =====================
+// Most 5 V relay boards are active LOW. Override these values in secrets.h if needed.
+#ifndef RELAY_ACTIVE_LOW_VALUE
+#define RELAY_ACTIVE_LOW_VALUE 1
+#endif
+
+#ifndef RELAY_CH1_PIN_VALUE
+#define RELAY_CH1_PIN_VALUE 25
+#endif
+
+#ifndef RELAY_CH2_PIN_VALUE
+#define RELAY_CH2_PIN_VALUE 26
+#endif
+
+#ifndef RELAY_CH3_PIN_VALUE
+#define RELAY_CH3_PIN_VALUE 27
+#endif
+
+#ifndef RELAY_CH4_PIN_VALUE
+#define RELAY_CH4_PIN_VALUE 33
+#endif
+
+const bool RELAY_ACTIVE_LOW = RELAY_ACTIVE_LOW_VALUE;
+const uint8_t RELAY_PINS[] = {
+  RELAY_CH1_PIN_VALUE,
+  RELAY_CH2_PIN_VALUE,
+  RELAY_CH3_PIN_VALUE,
+  RELAY_CH4_PIN_VALUE
+};
+const uint8_t HUMIDIFIER_RELAY_INDEX = 0;
+
+// ===================== HUMIDIFIER DEFAULTS =====================
+#ifndef HUMIDIFIER_ENABLED_VALUE
+#define HUMIDIFIER_ENABLED_VALUE 0
+#endif
+
+#ifndef HUMIDITY_SETPOINT_VALUE
+#define HUMIDITY_SETPOINT_VALUE 90.0f
+#endif
+
+#ifndef HUMIDITY_HYSTERESIS_VALUE
+#define HUMIDITY_HYSTERESIS_VALUE 3.0f
+#endif
+
+const bool DEFAULT_HUMIDIFIER_ENABLED = HUMIDIFIER_ENABLED_VALUE;
+const float DEFAULT_HUMIDITY_SETPOINT = HUMIDITY_SETPOINT_VALUE;
+const float DEFAULT_HUMIDITY_HYSTERESIS = HUMIDITY_HYSTERESIS_VALUE;
 
 // ===================== MODBUS SETTINGS =====================
 #ifndef MODBUS_BAUD_VALUE
@@ -107,6 +159,7 @@ WiFiClient espClient;
 
 PubSubClient mqtt(espClient);
 WebServer server(80);
+Preferences preferences;
 
 // ===================== SENSOR VALUES =====================
 float sht20Temp = NAN;
@@ -116,6 +169,15 @@ float pt100Temp = NAN;
 bool sht20Online = false;
 bool pt100Online = false;
 
+// ===================== HUMIDIFIER CONTROL =====================
+bool humidifierEnabled = DEFAULT_HUMIDIFIER_ENABLED;
+bool humidifierRelayOn = false;
+float humiditySetpoint = DEFAULT_HUMIDITY_SETPOINT;
+float humidityHysteresis = DEFAULT_HUMIDITY_HYSTERESIS;
+float humidityCalibration = 0.0f;
+unsigned long lastGoodHumidityAt = 0;
+const char* humidifierReason = "disabled";
+
 unsigned long lastRead = 0;
 unsigned long lastMqtt = 0;
 unsigned long lastWifiRetry = 0;
@@ -123,6 +185,102 @@ unsigned long lastWifiRetry = 0;
 const unsigned long READ_INTERVAL = 3000;
 const unsigned long MQTT_INTERVAL = 5000;
 const unsigned long WIFI_RETRY_INTERVAL = 30000;
+const unsigned long HUMIDITY_STALE_TIMEOUT = 15000;
+
+// ===================== RELAY HELPERS =====================
+uint8_t relayLevel(bool on) {
+  if (RELAY_ACTIVE_LOW) {
+    return on ? LOW : HIGH;
+  }
+  return on ? HIGH : LOW;
+}
+
+void initializeRelays() {
+  for (uint8_t pin : RELAY_PINS) {
+    digitalWrite(pin, relayLevel(false));
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, relayLevel(false));
+  }
+  humidifierRelayOn = false;
+}
+
+void setHumidifierRelay(bool on) {
+  if (humidifierRelayOn == on) {
+    return;
+  }
+
+  humidifierRelayOn = on;
+  digitalWrite(RELAY_PINS[HUMIDIFIER_RELAY_INDEX], relayLevel(on));
+  Serial.print("Humidifier relay CH1: ");
+  Serial.println(on ? "ON" : "OFF");
+}
+
+float controlledHumidity() {
+  if (!sht20Online || isnan(sht20Hum)) {
+    return NAN;
+  }
+  return sht20Hum + humidityCalibration;
+}
+
+bool humiditySensorFresh() {
+  return sht20Online &&
+         !isnan(sht20Hum) &&
+         lastGoodHumidityAt > 0 &&
+         millis() - lastGoodHumidityAt <= HUMIDITY_STALE_TIMEOUT;
+}
+
+void updateHumidifierControl() {
+  if (!humidifierEnabled) {
+    humidifierReason = "disabled";
+    setHumidifierRelay(false);
+    return;
+  }
+
+  if (!humiditySensorFresh()) {
+    humidifierReason = "sensor_offline";
+    setHumidifierRelay(false);
+    return;
+  }
+
+  float humidity = controlledHumidity();
+  if (humidifierRelayOn) {
+    if (humidity >= humiditySetpoint) {
+      humidifierReason = "target_reached";
+      setHumidifierRelay(false);
+    } else {
+      humidifierReason = "humidifying";
+    }
+    return;
+  }
+
+  if (humidity <= humiditySetpoint - humidityHysteresis) {
+    humidifierReason = "below_setpoint";
+    setHumidifierRelay(true);
+  } else {
+    humidifierReason = "holding";
+  }
+}
+
+void loadHumiditySettings() {
+  preferences.begin("humidity", false);
+  humidifierEnabled = preferences.getBool("enabled", DEFAULT_HUMIDIFIER_ENABLED);
+  humiditySetpoint = preferences.getFloat("setpoint", DEFAULT_HUMIDITY_SETPOINT);
+  humidityHysteresis = preferences.getFloat("hysteresis", DEFAULT_HUMIDITY_HYSTERESIS);
+  humidityCalibration = preferences.getFloat("humOffset", 0.0f);
+
+  if (humiditySetpoint < 0.0f || humiditySetpoint > 100.0f) {
+    humiditySetpoint = DEFAULT_HUMIDITY_SETPOINT;
+  }
+  if (humidityHysteresis < 0.5f || humidityHysteresis > 20.0f) {
+    humidityHysteresis = DEFAULT_HUMIDITY_HYSTERESIS;
+  }
+}
+
+void saveHumidityControlSettings() {
+  preferences.putBool("enabled", humidifierEnabled);
+  preferences.putFloat("setpoint", humiditySetpoint);
+  preferences.putFloat("hysteresis", humidityHysteresis);
+}
 
 // ===================== RS485 DIRECTION =====================
 void preTransmission() {
@@ -205,6 +363,9 @@ void connectMQTT() {
   if (ok) {
     Serial.println("connected");
     mqtt.publish(MQTT_TOPIC_STATUS, "online", true);
+    mqtt.subscribe(MQTT_TOPIC_CALIBRATION);
+    mqtt.subscribe(MQTT_TOPIC_HUMIDIFIER_CONFIG);
+    publishHumidifierStatus();
   } else {
     Serial.print("failed, rc=");
     Serial.println(mqtt.state());
@@ -232,6 +393,7 @@ bool readSHT20() {
     sht20Hum = rawHum / 10.0;
     sht20Temp = rawTemp / 10.0;
     sht20Online = true;
+    lastGoodHumidityAt = millis();
 
     Serial.print("SHT20 Temp: ");
     Serial.print(sht20Temp);
@@ -291,6 +453,162 @@ String boolJson(bool value) {
   return value ? "true" : "false";
 }
 
+int jsonValueStart(const String& json, const char* key) {
+  String token = "\"";
+  token += key;
+  token += "\"";
+  int keyPosition = json.indexOf(token);
+  if (keyPosition < 0) return -1;
+
+  int colonPosition = json.indexOf(':', keyPosition + token.length());
+  if (colonPosition < 0) return -1;
+
+  int valuePosition = colonPosition + 1;
+  while (valuePosition < (int)json.length() &&
+         (json[valuePosition] == ' ' || json[valuePosition] == '\t' ||
+          json[valuePosition] == '\r' || json[valuePosition] == '\n')) {
+    valuePosition++;
+  }
+  return valuePosition;
+}
+
+bool jsonFloatValue(const String& json, const char* key, float& value) {
+  int start = jsonValueStart(json, key);
+  if (start < 0) return false;
+
+  int end = start;
+  while (end < (int)json.length() &&
+         json[end] != ',' && json[end] != '}' && json[end] != ']') {
+    end++;
+  }
+
+  String raw = json.substring(start, end);
+  raw.trim();
+  if (raw.length() == 0) return false;
+
+  char* parsedEnd = nullptr;
+  float parsed = strtof(raw.c_str(), &parsedEnd);
+  if (parsedEnd == raw.c_str() || *parsedEnd != '\0' || isnan(parsed) || isinf(parsed)) {
+    return false;
+  }
+
+  value = parsed;
+  return true;
+}
+
+bool jsonBoolValue(const String& json, const char* key, bool& value) {
+  int start = jsonValueStart(json, key);
+  if (start < 0) return false;
+
+  if (json.substring(start, start + 4).equalsIgnoreCase("true")) {
+    value = true;
+    return true;
+  }
+  if (json.substring(start, start + 5).equalsIgnoreCase("false")) {
+    value = false;
+    return true;
+  }
+  return false;
+}
+
+String humidifierStatusJson() {
+  String json = "{";
+  json += "\"device\":\"central-command-rs485\",";
+  json += "\"enabled\":";
+  json += boolJson(humidifierEnabled);
+  json += ",";
+  json += "\"setpoint\":";
+  json += String(humiditySetpoint, 1);
+  json += ",";
+  json += "\"hysteresis\":";
+  json += String(humidityHysteresis, 1);
+  json += ",";
+  json += "\"relay_on\":";
+  json += boolJson(humidifierRelayOn);
+  json += ",";
+  json += "\"sensor_online\":";
+  json += boolJson(humiditySensorFresh());
+  json += ",";
+  json += "\"humidity_raw\":";
+  json += valueOrNull(sht20Online ? sht20Hum : NAN, 1);
+  json += ",";
+  json += "\"humidity_control\":";
+  json += valueOrNull(controlledHumidity(), 1);
+  json += ",";
+  json += "\"calibration\":";
+  json += String(humidityCalibration, 1);
+  json += ",";
+  json += "\"reason\":\"";
+  json += humidifierReason;
+  json += "\",";
+  json += "\"uptime_ms\":";
+  json += String(millis());
+  json += "}";
+  return json;
+}
+
+void publishHumidifierStatus() {
+  if (!mqtt.connected()) {
+    return;
+  }
+
+  String payload = humidifierStatusJson();
+  mqtt.publish(MQTT_TOPIC_HUMIDIFIER_STATUS, payload.c_str(), true);
+  Serial.print("Humidifier status: ");
+  Serial.println(payload);
+}
+
+void handleMqttMessage(char* topic, byte* payload, unsigned int length) {
+  String message;
+  message.reserve(length);
+  for (unsigned int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+
+  if (strcmp(topic, MQTT_TOPIC_CALIBRATION) == 0) {
+    float offset;
+    if (jsonFloatValue(message, "humidity", offset) && offset >= -50.0f && offset <= 50.0f) {
+      humidityCalibration = offset;
+      preferences.putFloat("humOffset", humidityCalibration);
+      updateHumidifierControl();
+      publishHumidifierStatus();
+      Serial.print("Humidity calibration updated: ");
+      Serial.println(humidityCalibration, 1);
+    }
+    return;
+  }
+
+  if (strcmp(topic, MQTT_TOPIC_HUMIDIFIER_CONFIG) != 0) {
+    return;
+  }
+
+  bool enabled;
+  float setpoint;
+  float hysteresis;
+  bool hasEnabled = jsonBoolValue(message, "enabled", enabled);
+  bool hasSetpoint = jsonFloatValue(message, "setpoint", setpoint);
+  bool hasHysteresis = jsonFloatValue(message, "hysteresis", hysteresis);
+
+  if (!hasEnabled && !hasSetpoint && !hasHysteresis) {
+    Serial.println("Ignored invalid humidifier config.");
+    return;
+  }
+  if ((hasSetpoint && (setpoint < 0.0f || setpoint > 100.0f)) ||
+      (hasHysteresis && (hysteresis < 0.5f || hysteresis > 20.0f))) {
+    Serial.println("Ignored out-of-range humidifier config.");
+    return;
+  }
+
+  if (hasEnabled) humidifierEnabled = enabled;
+  if (hasSetpoint) humiditySetpoint = setpoint;
+  if (hasHysteresis) humidityHysteresis = hysteresis;
+
+  saveHumidityControlSettings();
+  updateHumidifierControl();
+  publishHumidifierStatus();
+  Serial.println("Humidifier control settings updated.");
+}
+
 String apiJson() {
   String json = "{";
   json += "\"device\":\"central-command-rs485\",";
@@ -308,6 +626,24 @@ String apiJson() {
   json += ",";
   json += "\"pt100_online\":";
   json += boolJson(pt100Online);
+  json += ",";
+  json += "\"humidifier_enabled\":";
+  json += boolJson(humidifierEnabled);
+  json += ",";
+  json += "\"humidifier_setpoint\":";
+  json += String(humiditySetpoint, 1);
+  json += ",";
+  json += "\"humidifier_hysteresis\":";
+  json += String(humidityHysteresis, 1);
+  json += ",";
+  json += "\"humidifier_relay_on\":";
+  json += boolJson(humidifierRelayOn);
+  json += ",";
+  json += "\"humidifier_reason\":\"";
+  json += humidifierReason;
+  json += "\",";
+  json += "\"humidity_control\":";
+  json += valueOrNull(controlledHumidity(), 1);
   json += ",";
   json += "\"mqtt_connected\":";
   json += boolJson(mqtt.connected());
@@ -335,6 +671,7 @@ void publishMQTT() {
   if (mqtt.connected()) {
     String payload = apiJson();
     mqtt.publish(MQTT_TOPIC_DATA, payload.c_str(), true);
+    publishHumidifierStatus();
 
     Serial.print("MQTT publish: ");
     Serial.println(payload);
@@ -463,6 +800,9 @@ void setupWebServer() {
 // ===================== SETUP =====================
 void setup() {
   Serial.begin(115200);
+  initializeRelays();
+  loadHumiditySettings();
+  updateHumidifierControl();
   delay(1000);
 
   pinMode(RS485_DE_RE_PIN, OUTPUT);
@@ -479,6 +819,16 @@ void setup() {
   Serial.print("PT100: ");
   Serial.print(ENABLE_PT100 ? "enabled, ID " : "disabled, ID ");
   Serial.println(PT100_ID);
+  Serial.print("Humidifier relay: GPIO");
+  Serial.print(RELAY_PINS[HUMIDIFIER_RELAY_INDEX]);
+  Serial.print(RELAY_ACTIVE_LOW ? " active LOW" : " active HIGH");
+  Serial.print(" | enabled: ");
+  Serial.print(humidifierEnabled ? "yes" : "no");
+  Serial.print(" | setpoint: ");
+  Serial.print(humiditySetpoint, 1);
+  Serial.print("% | hysteresis: ");
+  Serial.print(humidityHysteresis, 1);
+  Serial.println("%");
 
   node.preTransmission(preTransmission);
   node.postTransmission(postTransmission);
@@ -488,7 +838,8 @@ void setup() {
   }
 
   mqtt.setServer(MQTT_SERVER, MQTT_PORT);
-  mqtt.setBufferSize(512);
+  mqtt.setBufferSize(768);
+  mqtt.setCallback(handleMqttMessage);
 
 #if MQTT_USE_TLS_VALUE
   // HiveMQ Cloud requires TLS on port 8883. For production, replace this with a pinned CA certificate.
@@ -536,6 +887,8 @@ void loop() {
     if (ENABLE_SHT20) {
       readSHT20();
     }
+
+    updateHumidifierControl();
   }
 
   if (WiFi.status() == WL_CONNECTED && now - lastMqtt >= MQTT_INTERVAL) {

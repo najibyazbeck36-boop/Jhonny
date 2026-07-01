@@ -8,6 +8,8 @@ The dashboard shows only three cards:
 - Air humidity from SHT20
 - Compost temperature from PT100
 
+It also shows a humidifier automation panel for Relay 1 of a 4-channel relay module.
+
 It also includes an AC Control panel for a second ESP32 that sends NEOCLIMA IR commands.
 
 The ESP32 firmware reads:
@@ -56,6 +58,7 @@ centralcommand/room1/sensors
    - `PubSubClient`
    - `ModbusMaster`
    - `ArduinoOTA` from ESP32 core
+   - `Preferences` from ESP32 core
 6. Flash the ESP32.
 7. Confirm the serial monitor shows sensor values and MQTT publishes.
 
@@ -71,6 +74,53 @@ ESP32 GND       -> RS485 module GND and sensor power GND
 RS485 A         -> sensor A
 RS485 B         -> sensor B
 ```
+
+## 4-Channel Relay and Humidifier
+
+The firmware initializes all relay channels OFF. Relay 1 controls the humidifier; channels
+2-4 are reserved for future equipment.
+
+Default low-voltage control wiring:
+
+```text
+ESP32 GPIO25 -> Relay IN1 (humidifier)
+ESP32 GPIO26 -> Relay IN2
+ESP32 GPIO27 -> Relay IN3
+ESP32 GPIO33 -> Relay IN4
+ESP32 GND    -> Relay GND
+5 V supply   -> Relay VCC
+```
+
+Most 4-channel modules are active LOW, which is the firmware default. Do not power relay
+coils from the ESP32 3.3 V pin. Use the relay board's specified supply and a shared ground,
+or follow its JD-VCC opto-isolation instructions. Pin assignments and relay polarity can be
+changed in `secrets.h`.
+
+For the humidifier load, use Relay 1 `COM` and `NO` so the humidifier remains disconnected
+while the relay is OFF. Mains voltage can cause fire, injury, or death: use a suitable fuse,
+enclosure, cable gauge, relay/contactor rating, and a qualified electrician.
+
+Humidity automation uses the calibrated SHT20 reading:
+
+```text
+Relay 1 ON  when humidity <= setpoint - hysteresis
+Relay 1 OFF when humidity >= setpoint
+Relay 1 OFF when automation is disabled or the sensor is offline/stale for 15 seconds
+```
+
+Example: with a 90% setpoint and 3% hysteresis, the humidifier turns ON at 87% or below and
+turns OFF at 90%. The ESP32 stores the settings in non-volatile memory and continues
+controlling locally if the dashboard or internet is offline.
+
+The dashboard and ESP32 exchange retained configuration and status messages on:
+
+```text
+centralcommand/room1/humidifier/config
+centralcommand/room1/humidifier/status
+```
+
+After flashing the firmware, open `Settings` -> `Humidity control`, choose the setpoint and
+hysteresis, enable automatic control, and press `Save`.
 
 Firmware defaults:
 

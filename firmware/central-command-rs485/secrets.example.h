@@ -24,3 +24,16 @@
 
 #define ENABLE_PT100_VALUE 0
 #define PT100_ID_VALUE 1
+
+// 4-channel relay module. Channel 1 controls the humidifier.
+// Most relay modules are active LOW; use 0 for an active-HIGH board.
+#define RELAY_ACTIVE_LOW_VALUE 1
+#define RELAY_CH1_PIN_VALUE 25
+#define RELAY_CH2_PIN_VALUE 26
+#define RELAY_CH3_PIN_VALUE 27
+#define RELAY_CH4_PIN_VALUE 33
+
+// Safe default is disabled until enabled from the dashboard.
+#define HUMIDIFIER_ENABLED_VALUE 0
+#define HUMIDITY_SETPOINT_VALUE 90.0f
+#define HUMIDITY_HYSTERESIS_VALUE 3.0f

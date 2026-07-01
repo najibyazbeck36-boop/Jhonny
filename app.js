@@ -24,7 +24,14 @@ const DEFAULT_SETTINGS = {
     substrate: 0
   },
   calibrationUpdatedAt: "",
-  calibrationSyncPending: false
+  calibrationSyncPending: false,
+  humidifierControl: {
+    enabled: false,
+    setpoint: 90,
+    hysteresis: 3
+  },
+  humidifierControlUpdatedAt: "",
+  humidifierControlSyncPending: false
 };
 
 const state = {
@@ -42,6 +49,8 @@ const state = {
   lastContactAt: null,
   lastReading: null,
   pendingCalibrationPublish: null,
+  pendingHumidifierPublish: null,
+  humidifierStatus: null,
   history: {
     air: [],
     humidity: [],
@@ -54,9 +63,11 @@ const els = {};
 document.addEventListener("DOMContentLoaded", () => {
   cacheElements();
   restorePendingCalibrationSync();
+  restorePendingHumidifierSync();
   bindEvents();
   hydrateSettingsForm();
   updateTargetLabels();
+  renderHumidifierControlValues();
   startDataSource();
   startIrPolling();
   window.addEventListener("resize", debounce(drawAllSparklines, 120));
@@ -102,6 +113,19 @@ function cacheElements() {
     "substrateCalibrationInput",
     "calibrationSyncStatus",
     "calibrationSyncTopic",
+    "humidifierSettingsButton",
+    "humidifierBadge",
+    "humidifierRelay",
+    "humidifierHumidity",
+    "humidifierSetpoint",
+    "humidifierHysteresis",
+    "humidifierLog",
+    "humidifierEnabledInput",
+    "humidifierSetpointInput",
+    "humidifierHysteresisInput",
+    "humidifierSyncStatus",
+    "humidifierConfigTopic",
+    "humidifierStatusTopic",
     "irBadge",
     "irRefreshButton",
     "acTemp",
@@ -126,6 +150,11 @@ function cacheElements() {
 
 function bindEvents() {
   els.settingsButton.addEventListener("click", openSettings);
+  els.humidifierSettingsButton.addEventListener("click", () => {
+    openSettings();
+    selectSettingsTab("humidifier");
+    els.humidifierEnabledInput.focus();
+  });
   els.closeSettingsButton.addEventListener("click", closeSettings);
   els.connectButton.addEventListener("click", startDataSource);
   els.irRefreshButton.addEventListener("click", loadIrStatus);
@@ -146,10 +175,18 @@ function bindEvents() {
       els.settingsForm.requestSubmit();
       return;
     }
+    if (activeTab?.dataset.settingsTab === "humidifier") {
+      els.humidifierEnabledInput.checked = DEFAULT_SETTINGS.humidifierControl.enabled;
+      els.humidifierSetpointInput.value = DEFAULT_SETTINGS.humidifierControl.setpoint;
+      els.humidifierHysteresisInput.value = DEFAULT_SETTINGS.humidifierControl.hysteresis;
+      els.settingsForm.requestSubmit();
+      return;
+    }
 
     const previousCalibration = state.settings.calibration;
     state.settings = structuredClone(DEFAULT_SETTINGS);
     state.pendingCalibrationPublish = null;
+    state.pendingHumidifierPublish = null;
     saveSettings();
     refreshCalibratedData(previousCalibration);
     hydrateSettingsForm();
@@ -174,6 +211,11 @@ function bindEvents() {
       nextSettings.calibration
     );
     const shouldSyncCalibration = calibrationChanged || activeTab?.dataset.settingsTab === "calibration";
+    const humidifierChanged = !humidifierControlsMatch(
+      previousSettings.humidifierControl,
+      nextSettings.humidifierControl
+    );
+    const shouldSyncHumidifier = humidifierChanged || activeTab?.dataset.settingsTab === "humidifier";
     const restartDataSource = dataSourceSettingsChanged(previousSettings, nextSettings);
     const restartIr = irSettingsChanged(previousSettings, nextSettings);
 
@@ -183,6 +225,9 @@ function bindEvents() {
     }
     if (shouldSyncCalibration) {
       queueCalibrationSync();
+    }
+    if (shouldSyncHumidifier) {
+      queueHumidifierSync();
     }
 
     saveSettings();
@@ -197,6 +242,7 @@ function bindEvents() {
       startDataSource();
     } else {
       publishQueuedCalibration().catch(() => {});
+      publishQueuedHumidifierControl().catch(() => {});
     }
 
     if (restartIr) {
@@ -225,6 +271,10 @@ function mergeSettings(base, incoming) {
   merged.calibration = {
     ...base.calibration,
     ...(incoming.calibration || {})
+  };
+  merged.humidifierControl = {
+    ...base.humidifierControl,
+    ...(incoming.humidifierControl || {})
   };
   return merged;
 }
@@ -296,7 +346,13 @@ function hydrateSettingsForm() {
   els.humidityCalibrationInput.value = settings.calibration.humidity;
   els.substrateCalibrationInput.value = settings.calibration.substrate;
   els.calibrationSyncTopic.textContent = calibrationTopic(settings.mqttTopic);
+  els.humidifierEnabledInput.checked = Boolean(settings.humidifierControl.enabled);
+  els.humidifierSetpointInput.value = settings.humidifierControl.setpoint;
+  els.humidifierHysteresisInput.value = settings.humidifierControl.hysteresis;
+  els.humidifierConfigTopic.textContent = humidifierConfigTopic(settings.mqttTopic);
+  els.humidifierStatusTopic.textContent = humidifierStatusTopic(settings.mqttTopic);
   updateCalibrationSyncStatus();
+  updateHumidifierSyncStatus();
 }
 
 function readSettingsForm() {
@@ -330,6 +386,19 @@ function readSettingsForm() {
     els.substrateCalibrationInput.value,
     DEFAULT_SETTINGS.calibration.substrate
   );
+  settings.humidifierControl.enabled = els.humidifierEnabledInput.checked;
+  settings.humidifierControl.setpoint = numberInRangeOrDefault(
+    els.humidifierSetpointInput.value,
+    0,
+    100,
+    DEFAULT_SETTINGS.humidifierControl.setpoint
+  );
+  settings.humidifierControl.hysteresis = numberInRangeOrDefault(
+    els.humidifierHysteresisInput.value,
+    0.5,
+    20,
+    DEFAULT_SETTINGS.humidifierControl.hysteresis
+  );
   return settings;
 }
 
@@ -337,6 +406,12 @@ function calibrationsMatch(first, second) {
   return CALIBRATION_CHANNELS.every(
     (channel) => Number(first?.[channel]) === Number(second?.[channel])
   );
+}
+
+function humidifierControlsMatch(first, second) {
+  return Boolean(first?.enabled) === Boolean(second?.enabled) &&
+    Number(first?.setpoint) === Number(second?.setpoint) &&
+    Number(first?.hysteresis) === Number(second?.hysteresis);
 }
 
 function settingsChanged(previous, next, keys) {
@@ -897,6 +972,8 @@ function startMqtt() {
 
       updateCalibrationSyncStatus();
       publishQueuedCalibration().catch(() => {});
+      updateHumidifierSyncStatus();
+      publishQueuedHumidifierControl().catch(() => {});
     });
     updateSystemLabels();
   });
@@ -904,6 +981,14 @@ function startMqtt() {
   state.mqttClient.on("message", (topic, message) => {
     if (topic === calibrationTopic()) {
       handleCalibrationMessage(message.toString());
+      return;
+    }
+    if (topic === humidifierConfigTopic()) {
+      handleHumidifierConfigMessage(message.toString());
+      return;
+    }
+    if (topic === humidifierStatusTopic()) {
+      handleHumidifierStatusMessage(message.toString());
       return;
     }
 
@@ -932,6 +1017,7 @@ function startMqtt() {
     state.connected = false;
     state.connectionText = "Reconnecting";
     updateCalibrationSyncStatus();
+    updateHumidifierSyncStatus();
     updateSystemLabels();
   });
 
@@ -939,6 +1025,7 @@ function startMqtt() {
     state.connected = false;
     state.connectionText = "Offline";
     updateCalibrationSyncStatus();
+    updateHumidifierSyncStatus();
     updateSystemLabels();
   });
 
@@ -946,6 +1033,7 @@ function startMqtt() {
     state.connected = false;
     state.connectionText = readableError(error);
     updateCalibrationSyncStatus();
+    updateHumidifierSyncStatus();
     updateSystemLabels();
   });
 
@@ -964,12 +1052,22 @@ function applyPayload(payload) {
   pushHistory("substrate", reading.substrateTemp);
 
   renderReading(reading);
+  if (reading.humidifierStatus) {
+    state.humidifierStatus = reading.humidifierStatus;
+    renderHumidifierStatus(reading.humidifierStatus);
+  }
   drawAllSparklines();
 }
 
 function mqttTopics() {
   return Array.from(
-    new Set([state.settings.mqttTopic, mqttStatusTopic(), calibrationTopic()].filter(Boolean))
+    new Set([
+      state.settings.mqttTopic,
+      mqttStatusTopic(),
+      calibrationTopic(),
+      humidifierConfigTopic(),
+      humidifierStatusTopic()
+    ].filter(Boolean))
   );
 }
 
@@ -988,6 +1086,23 @@ function calibrationTopic(mqttTopic = state.settings.mqttTopic) {
   }
 
   return `${topic}/calibration`;
+}
+
+function humidifierBaseTopic(mqttTopic = state.settings.mqttTopic) {
+  const topic = (mqttTopic || DEFAULT_SETTINGS.mqttTopic).replace(/\/+$/, "");
+  if (topic.endsWith("/sensors")) {
+    return topic.replace(/\/sensors$/, "/humidifier");
+  }
+
+  return `${topic}/humidifier`;
+}
+
+function humidifierConfigTopic(mqttTopic = state.settings.mqttTopic) {
+  return `${humidifierBaseTopic(mqttTopic)}/config`;
+}
+
+function humidifierStatusTopic(mqttTopic = state.settings.mqttTopic) {
+  return `${humidifierBaseTopic(mqttTopic)}/status`;
 }
 
 function queueCalibrationSync() {
@@ -1142,6 +1257,231 @@ function updateCalibrationSyncStatus() {
   setCalibrationSyncStatus(state.mqttClient?.connected ? "Connected" : "Waiting for MQTT");
 }
 
+function queueHumidifierSync() {
+  const updatedAt = new Date().toISOString();
+  state.settings.humidifierControlUpdatedAt = updatedAt;
+  state.settings.humidifierControlSyncPending = true;
+  state.pendingHumidifierPublish = {
+    version: 1,
+    ...state.settings.humidifierControl,
+    updatedAt
+  };
+  setHumidifierSyncStatus(
+    state.settings.source === "mqtt" ? "Syncing" : "Select MQTT WS to sync",
+    "warn"
+  );
+}
+
+function restorePendingHumidifierSync() {
+  if (!state.settings.humidifierControlSyncPending) {
+    return;
+  }
+
+  state.pendingHumidifierPublish = {
+    version: 1,
+    ...state.settings.humidifierControl,
+    updatedAt: state.settings.humidifierControlUpdatedAt || new Date().toISOString()
+  };
+}
+
+function publishQueuedHumidifierControl() {
+  const pending = state.pendingHumidifierPublish;
+  if (!pending || state.settings.source !== "mqtt" || !state.mqttClient?.connected) {
+    updateHumidifierSyncStatus();
+    return Promise.resolve(false);
+  }
+
+  setHumidifierSyncStatus("Syncing", "warn");
+  return new Promise((resolve, reject) => {
+    state.mqttClient.publish(
+      humidifierConfigTopic(),
+      JSON.stringify(pending),
+      { qos: 1, retain: true },
+      (error) => {
+        if (error) {
+          setHumidifierSyncStatus("Sync failed", "bad");
+          reject(error);
+          return;
+        }
+
+        if (state.pendingHumidifierPublish === pending) {
+          state.pendingHumidifierPublish = null;
+          state.settings.humidifierControlSyncPending = false;
+          saveSettings();
+        }
+        setHumidifierSyncStatus("Synced", "ok");
+        resolve(true);
+      }
+    );
+  });
+}
+
+function normalizeHumidifierControl(payload) {
+  const enabled = boolOrDefault(payload?.enabled, null);
+  const setpoint = firstNumber(payload?.setpoint);
+  const hysteresis = firstNumber(payload?.hysteresis);
+
+  if (
+    typeof enabled !== "boolean" ||
+    !isFiniteNumber(setpoint) ||
+    setpoint < 0 ||
+    setpoint > 100 ||
+    !isFiniteNumber(hysteresis) ||
+    hysteresis < 0.5 ||
+    hysteresis > 20
+  ) {
+    return null;
+  }
+
+  return { enabled, setpoint, hysteresis };
+}
+
+function handleHumidifierConfigMessage(message) {
+  if (state.pendingHumidifierPublish) {
+    return;
+  }
+
+  try {
+    const payload = JSON.parse(message);
+    const control = normalizeHumidifierControl(payload);
+    if (!control) {
+      throw new Error("Invalid humidifier control");
+    }
+
+    state.settings.humidifierControl = control;
+    state.settings.humidifierControlUpdatedAt = payload.updatedAt || new Date().toISOString();
+    state.settings.humidifierControlSyncPending = false;
+    saveSettings();
+    hydrateHumidifierInputs();
+    renderHumidifierControlValues();
+    setHumidifierSyncStatus("Synced", "ok");
+  } catch {
+    setHumidifierSyncStatus("Invalid shared data", "bad");
+  }
+}
+
+function normalizeHumidifierStatus(payload) {
+  const hasStatus = [
+    "humidifier_enabled",
+    "enabled",
+    "humidifier_relay_on",
+    "relay_on"
+  ].some((key) => Object.prototype.hasOwnProperty.call(payload, key));
+  if (!hasStatus) {
+    return null;
+  }
+
+  const enabled = boolOrDefault(payload.humidifier_enabled ?? payload.enabled, false);
+  const relayOn = boolOrDefault(payload.humidifier_relay_on ?? payload.relay_on, false);
+  const sensorOnline = boolOrDefault(
+    payload.humidifier_sensor_online ?? payload.sensor_online,
+    isFiniteNumber(payload.humidity_control)
+  );
+
+  return {
+    enabled,
+    relayOn,
+    sensorOnline,
+    setpoint: firstNumber(payload.humidifier_setpoint, payload.setpoint),
+    hysteresis: firstNumber(payload.humidifier_hysteresis, payload.hysteresis),
+    humidity: firstNumber(payload.humidity_control),
+    reason: normalizeText(payload.humidifier_reason ?? payload.reason)
+  };
+}
+
+function handleHumidifierStatusMessage(message) {
+  try {
+    const status = normalizeHumidifierStatus(JSON.parse(message));
+    if (!status) {
+      throw new Error("Invalid humidifier status");
+    }
+
+    state.humidifierStatus = status;
+    if (!state.pendingHumidifierPublish) {
+      const control = normalizeHumidifierControl(status);
+      if (control && !humidifierControlsMatch(state.settings.humidifierControl, control)) {
+        state.settings.humidifierControl = control;
+        saveSettings();
+        hydrateHumidifierInputs();
+      }
+    }
+    renderHumidifierStatus(status);
+  } catch {
+    setHumidifierBadge("Bad status", "bad");
+    els.humidifierLog.textContent = "Humidifier MQTT status was not valid JSON.";
+  }
+}
+
+function hydrateHumidifierInputs() {
+  const control = state.settings.humidifierControl;
+  els.humidifierEnabledInput.checked = Boolean(control.enabled);
+  els.humidifierSetpointInput.value = control.setpoint;
+  els.humidifierHysteresisInput.value = control.hysteresis;
+}
+
+function renderHumidifierControlValues() {
+  const control = state.settings.humidifierControl;
+  els.humidifierSetpoint.textContent = `${Number(control.setpoint).toFixed(1)}%`;
+  els.humidifierHysteresis.textContent = `${Number(control.hysteresis).toFixed(1)}%`;
+}
+
+function renderHumidifierStatus(status) {
+  renderHumidifierControlValues();
+  els.humidifierRelay.textContent = status.relayOn ? "ON" : "OFF";
+  els.humidifierHumidity.textContent = isFiniteNumber(status.humidity)
+    ? `${Number(status.humidity).toFixed(1)}%`
+    : "--";
+
+  const reasons = {
+    disabled: "Automatic humidifier control is disabled.",
+    sensor_offline: "Humidity sensor is offline or stale. Relay 1 is forced OFF.",
+    below_setpoint: "Humidity is below the activation threshold. Humidifier switched ON.",
+    humidifying: "Humidifier is running until the setpoint is reached.",
+    target_reached: "Humidity reached the setpoint. Humidifier switched OFF.",
+    holding: "Humidity is inside the hysteresis band. Humidifier remains OFF."
+  };
+
+  if (!status.enabled) {
+    setHumidifierBadge("Disabled", "warn");
+  } else if (!status.sensorOnline) {
+    setHumidifierBadge("Sensor offline", "bad");
+  } else if (status.relayOn) {
+    setHumidifierBadge("Humidifying", "ok");
+  } else {
+    setHumidifierBadge("Holding", "");
+  }
+
+  els.humidifierLog.textContent =
+    reasons[status.reason] || "Humidifier controller status received.";
+}
+
+function setHumidifierBadge(text, tone = "") {
+  els.humidifierBadge.textContent = text;
+  els.humidifierBadge.className = `pill ${tone}`.trim();
+}
+
+function setHumidifierSyncStatus(text, tone = "") {
+  els.humidifierSyncStatus.textContent = text;
+  els.humidifierSyncStatus.className = `sync-status ${tone}`.trim();
+}
+
+function updateHumidifierSyncStatus() {
+  if (state.settings.source !== "mqtt") {
+    setHumidifierSyncStatus("Select MQTT WS to sync", "warn");
+    return;
+  }
+
+  if (state.pendingHumidifierPublish) {
+    setHumidifierSyncStatus(
+      state.mqttClient?.connected ? "Syncing" : "Waiting to sync",
+      "warn"
+    );
+    return;
+  }
+
+  setHumidifierSyncStatus(state.mqttClient?.connected ? "Connected" : "Waiting for MQTT");
+}
+
 function handleMqttStatus(message) {
   const status = message.trim().toLowerCase();
   state.lastContactAt = Date.now();
@@ -1211,6 +1551,7 @@ function normalizePayload(payload) {
     wifiRssi: firstNumber(payload.wifi_rssi, payload.rssi),
     ip: payload.ip || payload.device_ip || "--",
     uptimeMs: firstNumber(payload.uptime_ms, payload.uptime),
+    humidifierStatus: normalizeHumidifierStatus(payload),
     raw: payload
   };
 }
@@ -1406,6 +1747,11 @@ function firstNumber(...values) {
 function numberOrDefault(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function numberInRangeOrDefault(value, min, max, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= min && number <= max ? number : fallback;
 }
 
 function boolOrDefault(value, fallback) {

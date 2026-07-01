@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mushroom Farm Climate Monitor</title>
-  <link rel="stylesheet" href="styles.css?v=20260701-global-calibration">
+  <link rel="stylesheet" href="styles.css?v=20260701-humidifier-control">
   <script defer src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <script defer src="app.js?v=20260701-global-calibration"></script>
+  <script defer src="app.js?v=20260701-humidifier-control"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -80,6 +80,41 @@
           <div class="target-line" id="substrateTarget">Target 18-24 deg C</div>
           <canvas class="sparkline" id="substrateSparkline" aria-label="Compost temperature history"></canvas>
         </article>
+      </section>
+
+      <section class="control-panel humidifier-panel" aria-label="Humidifier relay control">
+        <div class="control-head">
+          <div>
+            <p class="kicker">Humidity Control</p>
+            <h2>HUMIDIFIER · RELAY 1</h2>
+          </div>
+          <div class="control-actions">
+            <span class="pill" id="humidifierBadge">Waiting</span>
+            <button class="button secondary" type="button" id="humidifierSettingsButton">Set humidity</button>
+          </div>
+        </div>
+
+        <div class="humidifier-status-grid">
+          <div>
+            <span>Relay</span>
+            <strong id="humidifierRelay">--</strong>
+          </div>
+          <div>
+            <span>Control humidity</span>
+            <strong id="humidifierHumidity">--</strong>
+          </div>
+          <div>
+            <span>Setpoint</span>
+            <strong id="humidifierSetpoint">--</strong>
+          </div>
+          <div>
+            <span>Hysteresis</span>
+            <strong id="humidifierHysteresis">--</strong>
+          </div>
+        </div>
+        <p class="command-log humidifier-log" id="humidifierLog">
+          Waiting for the ESP32 humidifier controller.
+        </p>
       </section>
 
       <section class="control-panel" aria-label="AC controls">
@@ -174,6 +209,11 @@
           tabindex="-1">
           Sensors calibration
         </button>
+        <button class="settings-tab" id="humidifierSettingsTab" type="button" role="tab"
+          aria-selected="false" aria-controls="humidifierSettingsPanel" data-settings-tab="humidifier"
+          tabindex="-1">
+          Humidity control
+        </button>
       </div>
 
       <section id="generalSettingsPanel" role="tabpanel" aria-labelledby="generalSettingsTab"
@@ -254,6 +294,53 @@
             <span>Compost max</span>
             <input id="substrateMaxInput" type="number" step="0.1">
           </label>
+        </div>
+      </section>
+
+      <section id="humidifierSettingsPanel" role="tabpanel" aria-labelledby="humidifierSettingsTab"
+        data-settings-panel="humidifier" hidden>
+        <p class="calibration-help" id="humidifierHelp">
+          Relay 1 turns the humidifier ON when humidity falls to the setpoint minus the
+          hysteresis, then turns it OFF when humidity reaches the setpoint.
+        </p>
+
+        <label class="toggle-setting">
+          <input id="humidifierEnabledInput" type="checkbox">
+          <span>
+            <strong>Automatic humidifier control</strong>
+            <small>Disable this to force Relay 1 OFF.</small>
+          </span>
+        </label>
+
+        <div class="form-grid humidity-settings-grid">
+          <label>
+            <span>Humidity setpoint</span>
+            <span class="input-with-unit">
+              <input id="humidifierSetpointInput" type="number" inputmode="decimal" min="0" max="100"
+                step="0.1" value="90" aria-describedby="humidifierHelp">
+              <span>%</span>
+            </span>
+          </label>
+          <label>
+            <span>Hysteresis</span>
+            <span class="input-with-unit">
+              <input id="humidifierHysteresisInput" type="number" inputmode="decimal" min="0.5"
+                max="20" step="0.1" value="3" aria-describedby="humidifierHelp">
+              <span>%</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="calibration-sync">
+          <div>
+            <strong>Global MQTT control</strong>
+            <span class="sync-status" id="humidifierSyncStatus">Waiting for MQTT</span>
+          </div>
+          <p>
+            The setpoint is shared with the ESP32, every browser, and every installed app.
+          </p>
+          <code id="humidifierConfigTopic">centralcommand/room1/humidifier/config</code>
+          <code id="humidifierStatusTopic">centralcommand/room1/humidifier/status</code>
         </div>
       </section>
 

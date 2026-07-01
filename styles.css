@@ -280,6 +280,50 @@ legend {
   box-shadow: var(--shadow);
 }
 
+.humidifier-panel {
+  border-color: rgba(54, 95, 141, 0.24);
+  background:
+    linear-gradient(135deg, rgba(54, 95, 141, 0.12), transparent 34rem),
+    linear-gradient(315deg, rgba(47, 112, 104, 0.10), transparent 30rem),
+    rgba(255, 255, 255, 0.95);
+}
+
+.humidifier-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--line);
+}
+
+.humidifier-status-grid div {
+  min-width: 0;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.humidifier-status-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.humidifier-status-grid strong {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 1.05rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.humidifier-log {
+  margin-bottom: 0;
+}
+
 .control-head,
 .control-actions,
 .ir-layout,
@@ -478,6 +522,7 @@ legend {
 .settings-tabs {
   display: flex;
   gap: 4px;
+  overflow-x: auto;
   margin: 0 0 18px;
   border-bottom: 1px solid var(--line);
 }
@@ -491,6 +536,7 @@ legend {
   color: var(--muted);
   background: transparent;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .settings-tab[aria-selected="true"] {
@@ -568,6 +614,39 @@ legend {
   background: var(--surface-2);
   font-size: 0.9rem;
   line-height: 1.5;
+}
+
+.toggle-setting {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfb;
+  cursor: pointer;
+}
+
+.toggle-setting input {
+  width: 20px;
+  min-height: 20px;
+  accent-color: var(--teal);
+}
+
+.toggle-setting > span {
+  display: grid;
+  gap: 3px;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.toggle-setting small {
+  color: var(--muted);
+}
+
+.humidity-settings-grid {
+  margin-bottom: 16px;
 }
 
 .calibration-sync {
@@ -770,7 +849,8 @@ input.attention {
   .status-strip,
   .form-grid,
   .range-grid,
-  .calibration-grid {
+  .calibration-grid,
+  .humidifier-status-grid {
     grid-template-columns: 1fr;
   }
 
