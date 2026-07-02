@@ -71,6 +71,8 @@ document.addEventListener("DOMContentLoaded", () => {
   startDataSource();
   startIrPolling();
   window.addEventListener("resize", debounce(drawAllSparklines, 120));
+  window.addEventListener("hashchange", applySharedSetup);
+  window.addEventListener("pageshow", applySharedSetup);
 });
 
 function cacheElements() {
@@ -315,6 +317,20 @@ function readSharedSetup() {
   } catch {
     return null;
   }
+}
+
+function applySharedSetup() {
+  const sharedSetup = readSharedSetup();
+  if (!sharedSetup) {
+    return;
+  }
+
+  state.settings = mergeSettings(state.settings, sharedSetup);
+  saveSettings();
+  hydrateSettingsForm();
+  updateTargetLabels();
+  startDataSource();
+  startIrPolling();
 }
 
 function mergeSettings(base, incoming) {
