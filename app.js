@@ -10,7 +10,7 @@ const DEFAULT_SETTINGS = {
   mqttUser: "",
   mqttPassword: "",
   apiUrl: "http://192.168.1.50/api",
-  irUrl: "",
+  irUrl: "http://192.168.13.94",
   irCommandTopic: "centralcommand/room1/ac/cmd",
   irStatusTopic: "centralcommand/room1/ac/status",
   targets: {
@@ -252,11 +252,68 @@ function bindEvents() {
 }
 
 function loadSettings() {
+  let settings = structuredClone(DEFAULT_SETTINGS);
+
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return mergeSettings(DEFAULT_SETTINGS, stored || {});
+    settings = mergeSettings(DEFAULT_SETTINGS, stored || {});
+  } catch {}
+
+  const sharedSetup = readSharedSetup();
+  if (sharedSetup) {
+    settings = mergeSettings(settings, sharedSetup);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  }
+
+  return settings;
+}
+
+function readSharedSetup() {
+  const hash = window.location.hash.startsWith("#")
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  const encodedSetup = new URLSearchParams(hash).get("setup");
+
+  if (!encodedSetup) {
+    return null;
+  }
+
+  // Setup details belong in the URL fragment so they are never sent to the web host.
+  // Remove the fragment immediately; the imported settings remain stored on this phone.
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+
+  try {
+    const normalized = encodedSetup.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const bytes = Uint8Array.from(window.atob(padded), (character) => character.charCodeAt(0));
+    const setup = JSON.parse(new TextDecoder().decode(bytes));
+
+    if (setup.version !== 1) {
+      return null;
+    }
+
+    const mqttUrl = String(setup.mqttUrl || "").trim();
+    const parsedMqttUrl = new URL(mqttUrl);
+    if (parsedMqttUrl.protocol !== "wss:") {
+      return null;
+    }
+
+    return {
+      source: "mqtt",
+      mqttUrl,
+      mqttTopic: String(setup.mqttTopic || DEFAULT_SETTINGS.mqttTopic).trim(),
+      mqttUser: String(setup.mqttUser || ""),
+      mqttPassword: String(setup.mqttPassword || ""),
+      irUrl: "",
+      irCommandTopic: String(
+        setup.irCommandTopic || defaultIrCommandTopic(setup.mqttTopic)
+      ).trim(),
+      irStatusTopic: String(
+        setup.irStatusTopic || defaultIrStatusTopic(setup.mqttTopic)
+      ).trim()
+    };
   } catch {
-    return structuredClone(DEFAULT_SETTINGS);
+    return null;
   }
 }
 
